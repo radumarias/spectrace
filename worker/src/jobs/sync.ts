@@ -42,7 +42,7 @@ async function ghPages<T>(app: AppConfig, token: string, what: string, path: str
 }
 
 /** The installation that owns a repo: one of the project owner's installations on the repo's account. */
-async function installationFor(env: Bindings, projectId: string, fullName: string): Promise<number | null> {
+export async function installationFor(env: Bindings, projectId: string, fullName: string): Promise<number | null> {
   const owner = fullName.split("/")[0] ?? "";
   const row = await env.DB.prepare(
     `SELECT gi.id FROM github_installations gi
