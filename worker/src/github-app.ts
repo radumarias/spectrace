@@ -14,7 +14,7 @@ export interface AppConfig {
 export function appConfig(c: Context<AppEnv>): AppConfig {
   const { GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY } = c.env;
   if (!GITHUB_APP_ID?.trim() || !GITHUB_APP_SLUG?.trim() || !GITHUB_APP_PRIVATE_KEY?.trim()) {
-    throw new AppError("internal", "GitHub App is not configured (GITHUB_APP_ID / GITHUB_APP_SLUG / GITHUB_APP_PRIVATE_KEY)");
+    throw new AppError("not_configured", "GitHub App is not configured on this server");
   }
   const gh = githubConfig(c);
   return { appId: GITHUB_APP_ID.trim(), slug: GITHUB_APP_SLUG.trim(), privateKey: GITHUB_APP_PRIVATE_KEY, webUrl: gh.oauthUrl, apiUrl: gh.apiUrl };
@@ -175,7 +175,7 @@ export function forgetInstallationTokens() {
 export function appConfigFromEnv(env: Bindings): AppConfig {
   const { GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY } = env;
   if (!GITHUB_APP_ID?.trim() || !GITHUB_APP_SLUG?.trim() || !GITHUB_APP_PRIVATE_KEY?.trim()) {
-    throw new AppError("internal", "GitHub App is not configured (GITHUB_APP_ID / GITHUB_APP_SLUG / GITHUB_APP_PRIVATE_KEY)");
+    throw new AppError("not_configured", "GitHub App is not configured on this server");
   }
   const origin = (env.GITHUB_OAUTH_URL ?? "https://github.com").replace(/\/+$/, "");
   return {

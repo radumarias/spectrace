@@ -113,13 +113,13 @@ describe("sign in with GitHub", () => {
     expect(await res.json()).toEqual({ error: { code: "upstream", message: "internal server error" } });
   });
 
-  it("login without OAuth settings is a server error that hides details", async () => {
+  it("login without OAuth settings says sign-in is not configured", async () => {
     const saved = env.GITHUB_CLIENT_ID;
     env.GITHUB_CLIENT_ID = "";
     try {
       const res = await call("/api/auth/github/login");
-      expect(res.status).toBe(500);
-      expect(await res.json()).toEqual({ error: { code: "internal", message: "internal server error" } });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: { code: "not_configured", message: "GitHub sign-in is not configured on this server" } });
     } finally {
       env.GITHUB_CLIENT_ID = saved;
     }

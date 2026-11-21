@@ -11,6 +11,7 @@ const KINDS = {
   forbidden: 403,
   conflict: 409,
   upstream: 502,
+  not_configured: 503,
   internal: 500,
 } as const satisfies Record<string, ContentfulStatusCode>;
 
@@ -57,6 +58,6 @@ export function errorResponse(c: Context<AppEnv>, err: unknown) {
   if (app.status >= 500) {
     log("error", "request failed", { requestId, code: app.code, error: app.message, cause: String(app.cause ?? "") }, format);
   }
-  const message = app.status >= 500 ? "internal server error" : app.message;
+  const message = app.status >= 500 && app.code !== "not_configured" ? "internal server error" : app.message;
   return c.json({ error: { code: app.code, message } }, app.status);
 }
