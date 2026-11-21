@@ -1,3 +1,4 @@
+import type { Request } from "@playwright/test";
 import { expect, expectNoHorizontalScroll, mockApi, test, trackErrors, USER } from "./fixtures";
 
 const repo = (id: string, full_name: string) => ({ id, github_repo_id: null, full_name, default_branch: "main", index_state: "ready" });
@@ -17,7 +18,7 @@ test("the inbox matches the seeded pull requests and the filters change it", asy
   await mockApi(page, {
     "/api/me": USER,
     "/api/projects": [PROJECT],
-    "/api/projects/p1/pulls": (req) => {
+    "/api/projects/p1/pulls": (req: Request) => {
       const q = new URL(req.url()).searchParams;
       const f = q.get("filter");
       const r = q.get("repo");
