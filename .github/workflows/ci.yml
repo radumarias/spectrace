@@ -19,22 +19,6 @@ jobs:
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: spectrace
-          POSTGRES_PASSWORD: spectrace
-          POSTGRES_DB: spectrace
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U spectrace"
-          --health-interval 2s
-          --health-timeout 3s
-          --health-retries 20
-    env:
-      DATABASE_URL: postgres://spectrace:spectrace@localhost:5432/spectrace
     steps:
       - uses: actions/checkout@v4
 
@@ -64,7 +48,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -81,3 +65,30 @@ jobs:
 
       - name: Tests
         run: npm --prefix web test
+
+      - name: Build (web app plus Worker, as deployed)
+        run: |
+          npm --prefix worker ci --no-audit --no-fund
+          npm --prefix web run build
+
+  worker:
+    name: Worker (tsc, eslint, vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix worker ci --no-audit --no-fund
+
+      - name: Lint (tsc, eslint)
+        run: npm --prefix worker run lint
+
+      - name: Tests (workerd via Miniflare, no Cloudflare account needed)
+        run: npm --prefix worker test
