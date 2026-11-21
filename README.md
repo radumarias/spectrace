@@ -2,14 +2,26 @@
 
 Spec-driven PR review and agent orchestration. See the implementation plan: https://claude.ai/artifact/Ko3v3QgPX2n2PhGZFt8Gnh
 
-## Run the server
+## Run it locally
 
-Needs Docker (for Postgres) and [`just`](https://github.com/casey/just).
+Needs Node 22+, Rust (for `crates/core`) and [`just`](https://github.com/casey/just). No Docker and no Cloudflare account.
 
 ```sh
-just db      # Postgres 16 via Docker Compose, waits until healthy
-just dev     # starts the database, then server (:8080) and web app (:5173)
-curl localhost:8080/api/health
+just dev                              # web app and API on http://localhost:5173
+curl localhost:5173/api/health        # {"status":"ok","service":"spectrace-worker","database":"ok"}
+curl localhost:5173/api/openapi.json  # the API description
 ```
 
-Settings come from environment variables (see `.env.example`; copy it to `.env`): `DATABASE_URL` (required), `BIND_ADDR` or `PORT`, `LOG_FORMAT` (`pretty` or `json`), `RUST_LOG`, and for GitHub sign-in `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `PUBLIC_URL`. Migrations in `crates/server/migrations` run on startup.
+`just dev` installs dependencies, applies `worker/migrations` to a local D1 database, and starts Vite with the Cloudflare plugin, which runs the Worker from `worker/` in the same process (workerd). The web app and `/api` share one origin, so there is no proxy and no CORS.
+
+```sh
+just test     # Rust, Worker and web tests
+just lint     # rustfmt, clippy, tsc and eslint
+just migrate  # apply new D1 migrations to the local database
+```
+
+Worker settings are bindings and variables in `worker/wrangler.toml`. Secrets for local work go in `worker/.dev.vars` (git-ignored); copy `worker/.dev.vars.example`.
+
+## Sign in with GitHub
+
+Create an OAuth app at https://github.com/settings/developers with callback URL `http://localhost:5173/api/auth/github/callback`, put its id and secret in `worker/.dev.vars` (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `PUBLIC_URL`), run `just dev`, and open http://localhost:5173/api/auth/github/login. On Cloudflare, set the same with `wrangler secret put GITHUB_CLIENT_ID`, `wrangler secret put GITHUB_CLIENT_SECRET` and `PUBLIC_URL` (secret or var) set to the deployed origin, with the OAuth app's callback URL changed to match.

@@ -2,64 +2,108 @@
   "openapi": "3.1.0",
   "info": {
     "title": "spectrace API",
-    "description": "",
-    "license": {
-      "name": ""
-    },
     "version": "0.1.0"
   },
-  "paths": {
-    "/api/auth/github/callback": {
-      "get": {
-        "tags": [
-          "auth"
-        ],
-        "operationId": "callback",
-        "parameters": [
-          {
-            "name": "code",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "state",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "error",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
           }
-        ],
-        "responses": {
-          "303": {
-            "description": "Session started; redirect to /"
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
           },
-          "400": {
-            "description": "Bad or missing code or state",
+          "github_id": {
+            "type": "integer"
+          },
+          "login": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "avatar_url": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "github_id",
+          "login",
+          "name",
+          "avatar_url"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Liveness plus a database round trip",
+        "responses": {
+          "200": {
+            "description": "The Worker and its database are up",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "database": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "service",
+                    "database"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The database is unreachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -69,44 +113,83 @@
     },
     "/api/auth/github/login": {
       "get": {
-        "tags": [
-          "auth"
-        ],
-        "operationId": "login",
+        "summary": "Start GitHub sign-in (redirects to GitHub)",
         "responses": {
           "303": {
-            "description": "Redirect to GitHub; sets a short-lived state cookie"
-          }
-        }
-      }
-    },
-    "/api/auth/logout": {
-      "post": {
-        "tags": [
-          "auth"
-        ],
-        "operationId": "logout",
-        "responses": {
-          "204": {
-            "description": "Session ended and cookie cleared"
-          }
-        }
-      }
-    },
-    "/api/health": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Liveness plus a database round trip, so a broken database shows up here.",
-        "operationId": "health",
-        "responses": {
-          "200": {
-            "description": "Server and database are up",
+            "description": "Redirect to GitHub"
+          },
+          "500": {
+            "description": "Server error",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Health"
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/github/callback": {
+      "get": {
+        "summary": "GitHub redirects back here; starts a session",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Signed in, redirect to /"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
@@ -116,13 +199,10 @@
     },
     "/api/me": {
       "get": {
-        "tags": [
-          "auth"
-        ],
-        "operationId": "me",
+        "summary": "The signed-in user",
         "responses": {
           "200": {
-            "description": "The signed-in user",
+            "description": "The user",
             "content": {
               "application/json": {
                 "schema": {
@@ -136,94 +216,20 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorBody"
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }
           }
         }
       }
-    }
-  },
-  "components": {
-    "schemas": {
-      "ErrorBody": {
-        "type": "object",
-        "description": "Error body: `{\"error\": {\"code\", \"message\"}}`.",
-        "required": [
-          "error"
-        ],
-        "properties": {
-          "error": {
-            "$ref": "#/components/schemas/ErrorDetail"
-          }
-        }
-      },
-      "ErrorDetail": {
-        "type": "object",
-        "required": [
-          "code",
-          "message"
-        ],
-        "properties": {
-          "code": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          }
-        }
-      },
-      "Health": {
-        "type": "object",
-        "required": [
-          "status",
-          "service",
-          "database"
-        ],
-        "properties": {
-          "database": {
-            "type": "string"
-          },
-          "service": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        }
-      },
-      "User": {
-        "type": "object",
-        "description": "The signed-in user, as returned by `/api/me`.",
-        "required": [
-          "id",
-          "github_id",
-          "login"
-        ],
-        "properties": {
-          "avatar_url": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "github_id": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "login": {
-            "type": "string"
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ]
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Sign out",
+        "responses": {
+          "204": {
+            "description": "Session ended (also when there was none)"
           }
         }
       }

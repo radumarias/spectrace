@@ -1,10 +1,4 @@
-# Copy to .env (git-ignored). The justfile loads it automatically.
-DATABASE_URL=postgres://spectrace:spectrace@localhost:5432/spectrace
-BIND_ADDR=127.0.0.1:8080
-LOG_FORMAT=pretty
-RUST_LOG=info
-
-# GitHub sign-in (set both, or neither). Create an OAuth app at
+# Copy to .dev.vars (git-ignored) for `just dev`. Create an OAuth app at
 # https://github.com/settings/developers with callback URL
 # http://localhost:5173/api/auth/github/callback
 GITHUB_CLIENT_ID=
