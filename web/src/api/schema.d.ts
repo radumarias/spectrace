@@ -414,6 +414,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/github/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * GitHub App webhook receiver
+         * @description Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted (`handled` is false for events we do not use) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WebhookResult"];
+                    };
+                };
+                /** @description Not a JSON payload */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Signature missing or wrong */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Webhook secret not configured */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -1101,6 +1167,12 @@ export interface components {
             private: boolean;
             default_branch: string;
             html_url: string;
+        };
+        WebhookResult: {
+            /** @enum {boolean} */
+            ok: true;
+            event: string;
+            handled: boolean;
         };
         Project: {
             id: string;

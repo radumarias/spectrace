@@ -22,6 +22,7 @@ export default defineConfig(async () => {
             GITHUB_APP_ID: "12345",
             GITHUB_APP_SLUG: "spectrace-test",
             GITHUB_APP_PRIVATE_KEY: TEST_APP_PRIVATE_KEY,
+            GITHUB_WEBHOOK_SECRET: "whsec-test",
           },
         },
       }),
