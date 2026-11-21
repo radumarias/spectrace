@@ -90,7 +90,7 @@ export function Shell() {
             <div key={g.title} style={{ display: "contents" }}>
               <span className="sect">{g.title}</span>
               {g.items.map((it) => (
-                <NavLink key={it.id} to={`/${it.id}`} className={({ isActive }) => (isActive ? "on" : "")}>
+                <NavLink key={it.id} to={`/${it.id}`} className={({ isActive }) => (isActive || (it.id === "prs" && route === "pr") ? "on" : "")}>
                   <Icon name={it.id} />
                   <span>{it.label}</span>
                   <Badge id={it.id} />
