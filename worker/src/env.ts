@@ -20,6 +20,8 @@ export interface Bindings {
   GITHUB_APP_ID?: string;
   GITHUB_APP_SLUG?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
+  /** The GitHub App's webhook secret (T2.2). Secret. The webhook endpoint answers 500 until it is set. */
+  GITHUB_WEBHOOK_SECRET?: string;
   /** Overrides for tests: default `https://github.com` and `https://api.github.com`. */
   GITHUB_OAUTH_URL?: string;
   GITHUB_API_URL?: string;

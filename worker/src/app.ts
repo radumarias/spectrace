@@ -8,6 +8,7 @@ import { registerHealth } from "./routes/health";
 import { registerJobs } from "./routes/jobs";
 import { registerPulls } from "./routes/pulls";
 import { registerProjects } from "./routes/projects";
+import { registerWebhook } from "./routes/webhook";
 
 export function createApp() {
   const app = new OpenAPIHono<AppEnv>({
@@ -34,6 +35,7 @@ export function createApp() {
   registerHealth(app);
   registerAuth(app);
   registerGithub(app);
+  registerWebhook(app);
   registerProjects(app);
   registerJobs(app);
   registerPulls(app);

@@ -70,11 +70,8 @@ export async function emit(env: Bindings, job: Pick<JobRow, "id" | "project_id">
   return ev;
 }
 
-/**
- * Insert a job and put it on the queue. If the queue is unavailable the job is
- * marked failed ("could not be queued") and a 502 is thrown.
- */
-export async function enqueueJob(env: Bindings, projectId: string, kind: string, target: string, maxAttempts: number): Promise<JobRow> {
+/** Create a job, announce it and put it on the queue. Throws `upstream` (and marks the job failed) when the queue refuses it. */
+export async function enqueueJob(env: Bindings, projectId: string, kind: string, target = "", maxAttempts = 3): Promise<JobRow> {
   const id = crypto.randomUUID();
   const row = await env.DB.prepare("INSERT INTO jobs (id, project_id, kind, target, max_attempts) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING *")
     .bind(id, projectId, kind, target, maxAttempts)
