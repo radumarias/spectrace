@@ -107,11 +107,14 @@ pub fn is_valid_req_id(id: &str) -> bool {
     let Some((step, tag)) = id.split_once('/') else {
         return false;
     };
+    is_valid_step_id(step) && is_valid_tag(tag)
+}
+
+/// A requirement tag: `r` followed by a positive integer with no leading zero,
+/// such as `r1` or `r10`.
+pub fn is_valid_tag(tag: &str) -> bool {
     let digits = tag.strip_prefix('r').unwrap_or("");
-    is_valid_step_id(step)
-        && !digits.is_empty()
-        && !digits.starts_with('0')
-        && digits.chars().all(|c| c.is_ascii_digit())
+    !digits.is_empty() && !digits.starts_with('0') && digits.chars().all(|c| c.is_ascii_digit())
 }
 
 /// Anything `#[spec(...)]` may name: a step id or a requirement id.
