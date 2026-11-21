@@ -1075,6 +1075,221 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/pulls/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pull from GitHub: queue a sync of the project's pull requests (owner only)
+         * @description Queues the same `sync` job as `POST /jobs`. Follow it with `GET /jobs/{id}` or the project's event socket. If a sync for the same repos is already queued or running, that job is returned instead of a second one.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        repo?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The sync job, queued or already in flight */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The queue is unavailable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/pulls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The project's pull requests, for the inbox
+         * @description `filter` is the inbox tab: `needs` (open, not a draft, not yet handled by you), `open`, `merged`, or `all` (default). `repo` (`owner/name`) narrows the list to one repo; `counts` always covers every repo. Needs-you PRs come first, then the most recently updated.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    filter?: "needs" | "open" | "merged" | "all";
+                    repo?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Pull requests and tab counts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            pulls: components["schemas"]["Pull"][];
+                            counts: components["schemas"]["PullCounts"];
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/pulls/{pullId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One pull request: header, description and changed files */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    pullId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The pull request */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PullDetail"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1131,6 +1346,47 @@ export interface components {
             createdAt: string;
             updatedAt: string;
             finishedAt: string | null;
+        };
+        Pull: {
+            id: string;
+            /** @example acme/shop */
+            repo: string;
+            number: number;
+            title: string;
+            author: string;
+            /** @enum {string} */
+            state: "open" | "merged" | "closed";
+            draft: boolean;
+            /** @description Open, not a draft, and not yet handled by you. */
+            needsYou: boolean;
+            headRef: string;
+            baseRef: string;
+            htmlUrl: string;
+            additions: number;
+            deletions: number;
+            changedFiles: number;
+            createdAt: string;
+            updatedAt: string;
+            mergedAt: string | null;
+            syncedAt: string;
+        };
+        /** @description Size of each inbox tab, over every repo of the project. */
+        PullCounts: {
+            needs: number;
+            open: number;
+            merged: number;
+        };
+        PullDetail: components["schemas"]["Pull"] & {
+            body: string;
+            headSha: string;
+            files: components["schemas"]["PullFile"][];
+        };
+        PullFile: {
+            path: string;
+            status: string;
+            previousPath: string | null;
+            additions: number;
+            deletions: number;
         };
     };
     responses: never;
