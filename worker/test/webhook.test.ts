@@ -46,7 +46,7 @@ async function deliver(event: string, payload: object, repo: { fullName: string 
 
 const pr = (repoId: string, number = 7) =>
   env.DB.prepare(
-    "SELECT title, state, draft, head_sha, files_sha, additions, deletions, changed_files, github_updated_at FROM pull_requests WHERE repo_id = ?1 AND number = ?2",
+    "SELECT title, state, draft, head_sha, files_sha, additions, deletions, changed_files, github_updated_at, merged_at FROM pull_requests WHERE repo_id = ?1 AND number = ?2",
   )
     .bind(repoId, number)
     .first<Record<string, unknown>>();
@@ -127,7 +127,7 @@ describe("webhook events", () => {
     expect(await syncJobs(projectId)).toHaveLength(1);
 
     await deliver("pull_request", closedMerged, repo);
-    expect(await pr(repoId)).toMatchObject({ state: "closed" });
+    expect(await pr(repoId)).toMatchObject({ state: "closed", merged_at: "2026-11-19T13:00:00Z" });
 
     expect(await liveEvents(projectId)).toEqual([
       ["pr.updated", { repo: repo.fullName, number: 7, cause: "pull_request.opened" }],

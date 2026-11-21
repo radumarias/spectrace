@@ -5,7 +5,7 @@
 // may name one repo ("owner/name"); empty means every repo of the project.
 // Safe to run again and again: rows are upserted by (repo, PR number), a PR's
 // files are only re-read when its head commit moved, and PRs that are no
-// longer open on GitHub are marked closed.
+// longer open on GitHub are marked closed (with `merged_at` when merged).
 import type { Bindings } from "../env";
 import { AppError } from "../error";
 import { appConfigFromEnv, ghHeaders, installationToken, type AppConfig } from "../github-app";
@@ -56,6 +56,19 @@ async function installationFor(env: Bindings, projectId: string, fullName: strin
   return row?.id ?? null;
 }
 
+/** When a PR was merged, or null if it was closed unmerged (or GitHub cannot say). */
+async function mergedAtOf(app: AppConfig, token: string, fullName: string, number: number): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(`${app.apiUrl}/repos/${fullName}/pulls/${number}`, { headers: ghHeaders(token) });
+  } catch (cause) {
+    throw new AppError("upstream", `GitHub ${fullName}#${number}: ${String(cause)}`, { cause });
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) throw new AppError("upstream", `GitHub ${fullName}#${number}: status ${res.status}`);
+  return ((await res.json()) as GhPull).merged_at ?? null;
+}
+
 async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: RepoRow, progress: (n: number) => Promise<void>): Promise<number> {
   const installationId = await installationFor(env, projectId, repo.full_name);
   if (installationId === null) throw new PermanentError(`no GitHub App installation for ${repo.full_name}; install the app on its owner first`);
@@ -80,13 +93,18 @@ async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: 
     await progress(pr.number);
   }
 
-  // Anything stored as open that GitHub no longer lists was merged or closed.
+  // Anything stored as open that GitHub no longer lists was merged or closed;
+  // ask GitHub which, so the inbox can tell "Merged" from closed.
   const open = new Set(pulls.map((p) => p.number));
   const gone = [...known.keys()].filter((n) => !open.has(n));
-  if (gone.length) {
-    await env.DB.batch(
-      gone.map((n) => env.DB.prepare("UPDATE pull_requests SET state = 'closed', synced_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE repo_id = ?1 AND number = ?2 AND state = 'open'").bind(repo.id, n)),
-    );
+  for (const n of gone) {
+    const mergedAt = await mergedAtOf(app, token, repo.full_name, n);
+    await env.DB.prepare(
+      `UPDATE pull_requests SET state = 'closed', merged_at = ?3, synced_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE repo_id = ?1 AND number = ?2 AND state = 'open'`,
+    )
+      .bind(repo.id, n, mergedAt)
+      .run();
   }
   return pulls.length;
 }

@@ -245,6 +245,170 @@
           "updatedAt",
           "finishedAt"
         ]
+      },
+      "Pull": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string",
+            "example": "acme/shop"
+          },
+          "number": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "merged",
+              "closed"
+            ]
+          },
+          "draft": {
+            "type": "boolean"
+          },
+          "needsYou": {
+            "type": "boolean",
+            "description": "Open, not a draft, and not yet handled by you."
+          },
+          "headRef": {
+            "type": "string"
+          },
+          "baseRef": {
+            "type": "string"
+          },
+          "htmlUrl": {
+            "type": "string"
+          },
+          "additions": {
+            "type": "integer"
+          },
+          "deletions": {
+            "type": "integer"
+          },
+          "changedFiles": {
+            "type": "integer"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "mergedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "syncedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "repo",
+          "number",
+          "title",
+          "author",
+          "state",
+          "draft",
+          "needsYou",
+          "headRef",
+          "baseRef",
+          "htmlUrl",
+          "additions",
+          "deletions",
+          "changedFiles",
+          "createdAt",
+          "updatedAt",
+          "mergedAt",
+          "syncedAt"
+        ]
+      },
+      "PullCounts": {
+        "type": "object",
+        "properties": {
+          "needs": {
+            "type": "integer"
+          },
+          "open": {
+            "type": "integer"
+          },
+          "merged": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "needs",
+          "open",
+          "merged"
+        ],
+        "description": "Size of each inbox tab, over every repo of the project."
+      },
+      "PullDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Pull"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "body": {
+                "type": "string"
+              },
+              "headSha": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PullFile"
+                }
+              }
+            },
+            "required": [
+              "body",
+              "headSha",
+              "files"
+            ]
+          }
+        ]
+      },
+      "PullFile": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "previousPath": {
+            "type": "string",
+            "nullable": true
+          },
+          "additions": {
+            "type": "integer"
+          },
+          "deletions": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path",
+          "status",
+          "previousPath",
+          "additions",
+          "deletions"
+        ]
       }
     },
     "parameters": {}
@@ -1303,6 +1467,259 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/pulls/sync": {
+      "post": {
+        "summary": "Pull from GitHub: queue a sync of the project's pull requests (owner only)",
+        "description": "Queues the same `sync` job as `POST /jobs`. Follow it with `GET /jobs/{id}` or the project's event socket. If a sync for the same repos is already queued or running, that job is returned instead of a second one.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The sync job, queued or already in flight",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The queue is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/pulls": {
+      "get": {
+        "summary": "The project's pull requests, for the inbox",
+        "description": "`filter` is the inbox tab: `needs` (open, not a draft, not yet handled by you), `open`, `merged`, or `all` (default). `repo` (`owner/name`) narrows the list to one repo; `counts` always covers every repo. Needs-you PRs come first, then the most recently updated.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "needs",
+                "open",
+                "merged",
+                "all"
+              ],
+              "default": "all"
+            },
+            "required": false,
+            "name": "filter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": false,
+            "name": "repo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pull requests and tab counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pulls": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Pull"
+                      }
+                    },
+                    "counts": {
+                      "$ref": "#/components/schemas/PullCounts"
+                    }
+                  },
+                  "required": [
+                    "pulls",
+                    "counts"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/pulls/{pullId}": {
+      "get": {
+        "summary": "One pull request: header, description and changed files",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "pullId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullDetail"
                 }
               }
             }

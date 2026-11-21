@@ -9,7 +9,7 @@ import { requireProjectOwner } from "./projects";
 const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
 const JobParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "jobId", in: "path" } });
 
-const Job = z
+export const Job = z
   .object({
     id: z.string(),
     projectId: z.string(),
@@ -25,7 +25,7 @@ const Job = z
   })
   .openapi("Job");
 
-function toJob(r: JobRow): z.infer<typeof Job> {
+export function toJob(r: JobRow): z.infer<typeof Job> {
   return {
     id: r.id,
     projectId: r.project_id,

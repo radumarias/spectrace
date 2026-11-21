@@ -16,6 +16,8 @@ export interface GhPull {
   base: { ref: string };
   created_at: string;
   updated_at: string;
+  /** Set when the PR was merged (single-PR object and webhooks; the list endpoint leaves it out). */
+  merged_at?: string | null;
   /** Only the single-PR object (and so webhooks) has these; the list endpoint does not. */
   additions?: number;
   deletions?: number;
@@ -55,8 +57,8 @@ export function pullStatements(env: Bindings, repoId: string, id: string, pr: Gh
   const statements: D1PreparedStatement[] = [
     env.DB.prepare(
       `INSERT INTO pull_requests (id, repo_id, number, github_pr_id, title, body, author_login, state, draft, head_ref, head_sha, base_ref, html_url,
-                                  additions, deletions, changed_files, github_created_at, github_updated_at, synced_at, files_sha)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ${NOW}, ?20)
+                                  additions, deletions, changed_files, github_created_at, github_updated_at, synced_at, files_sha, merged_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ${NOW}, ?20, ?21)
        ON CONFLICT (repo_id, number) DO UPDATE SET
          github_pr_id = excluded.github_pr_id, title = excluded.title, body = excluded.body, author_login = excluded.author_login,
          state = excluded.state, draft = excluded.draft, head_ref = excluded.head_ref, head_sha = excluded.head_sha, base_ref = excluded.base_ref,
@@ -65,13 +67,13 @@ export function pullStatements(env: Bindings, repoId: string, id: string, pr: Gh
          deletions = CASE WHEN ?19 THEN excluded.deletions ELSE deletions END,
          changed_files = CASE WHEN ?19 THEN excluded.changed_files ELSE changed_files END,
          github_created_at = excluded.github_created_at, github_updated_at = excluded.github_updated_at, synced_at = excluded.synced_at,
-         files_sha = COALESCE(excluded.files_sha, files_sha)
+         files_sha = COALESCE(excluded.files_sha, files_sha), merged_at = excluded.merged_at
        WHERE excluded.github_updated_at >= pull_requests.github_updated_at`,
     ).bind(
       id, repoId, pr.number, pr.id, pr.title, pr.body ?? "", pr.user?.login ?? "", pr.state === "open" ? "open" : "closed", pr.draft ? 1 : 0,
       pr.head.ref, pr.head.sha, pr.base.ref, pr.html_url,
       stats?.additions ?? 0, stats?.deletions ?? 0, stats?.changed ?? 0, pr.created_at, pr.updated_at, stats ? 1 : 0,
-      files ? pr.head.sha : null,
+      files ? pr.head.sha : null, pr.merged_at ?? null,
     ),
   ];
   if (files) {
