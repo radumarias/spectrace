@@ -66,6 +66,12 @@ const PullDetail = Pull.extend({
   checksState: z.enum(["none", "pending", "passing", "failing"]).openapi({ description: "`none` when no check run is stored (not synced, or the repo has no CI)." }),
 }).openapi("PullDetail");
 
+const PullDiff = z
+  .object({
+    files: z.array(z.object({ path: z.string(), patch: z.string().nullable().openapi({ description: "GitHub's unified diff; null for binary files and diffs that are too large." }) })),
+  })
+  .openapi("PullDiff");
+
 const Counts = z
   .object({ needs: z.number().int(), open: z.number().int(), merged: z.number().int() })
   .openapi("PullCounts", { description: "Size of each inbox tab, over every repo of the project." });
@@ -167,6 +173,15 @@ const get = createRoute({
   summary: "One pull request: header, description and changed files",
   request: { params: z.object({ projectId: ProjectParam, pullId: PullParam }) },
   responses: { 200: { description: "The pull request", content: { "application/json": { schema: PullDetail } } }, 401: errors[401], 404: errors[404] },
+});
+
+const diff = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/pulls/{pullId}/diff",
+  summary: "The unified diff of each changed file",
+  description: "Kept apart from the pull request so the page loads without it. Files are in the same order as `files` on the pull request.",
+  request: { params: z.object({ projectId: ProjectParam, pullId: PullParam }) },
+  responses: { 200: { description: "Diffs by file", content: { "application/json": { schema: PullDiff } } }, 401: errors[401], 404: errors[404] },
 });
 
 const pull = createRoute({
@@ -399,6 +414,15 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
       ).bind(projectId, user.id),
     ]);
     return c.json({ pulls: (rows!.results as unknown as PullRow[]).map(toPull), counts: counts!.results[0] as z.infer<typeof Counts> }, 200);
+  });
+
+  app.openapi(diff, async (c) => {
+    const { projectId, pullId } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
+    const found = await c.env.DB.prepare("SELECT 1 AS x FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id WHERE r.project_id = ?1 AND p.id = ?2").bind(projectId, pullId).first();
+    if (!found) throw AppError.notFound(`pull request ${pullId}`);
+    const { results } = await c.env.DB.prepare("SELECT path, patch FROM pr_files WHERE pull_request_id = ?1 ORDER BY path").bind(pullId).all<{ path: string; patch: string | null }>();
+    return c.json({ files: results }, 200);
   });
 
   app.openapi(get, async (c) => {

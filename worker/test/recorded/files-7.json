@@ -1,4 +1,15 @@
 [
-  { "filename": "src/checkout/coupon.ts", "status": "added", "additions": 40, "deletions": 0 },
-  { "filename": "src/checkout/pay.ts", "status": "modified", "additions": 6, "deletions": 2 }
+  {
+    "filename": "src/checkout/coupon.ts",
+    "status": "added",
+    "additions": 40,
+    "deletions": 0
+  },
+  {
+    "filename": "src/checkout/pay.ts",
+    "status": "modified",
+    "additions": 6,
+    "deletions": 2,
+    "patch": "@@ -10,3 +10,7 @@ export function pay() {\n   const total = cart.total();\n-  return charge(total);\n+  const discounted = applyCoupon(total, coupon);\n+  return charge(discounted);\n }"
+  }
 ]

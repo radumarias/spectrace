@@ -1365,6 +1365,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/pulls/{pullId}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The unified diff of each changed file
+         * @description Kept apart from the pull request so the page loads without it. Files are in the same order as `files` on the pull request.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    pullId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Diffs by file */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PullDiff"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{projectId}/pulls/{pullId}": {
         parameters: {
             query?: never;
@@ -1755,6 +1815,13 @@ export interface components {
             needs: number;
             open: number;
             merged: number;
+        };
+        PullDiff: {
+            files: {
+                path: string;
+                /** @description GitHub's unified diff; null for binary files and diffs that are too large. */
+                patch: string | null;
+            }[];
         };
         PullDetail: components["schemas"]["Pull"] & {
             body: string;

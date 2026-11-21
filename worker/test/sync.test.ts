@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { hashToken } from "../src/auth";
 import { forgetInstallationTokens } from "../src/github-app";
+import { MAX_PATCH_CHARS } from "../src/pulls";
 import { JOBS_QUEUE, type JobMessage } from "../src/jobs/queue";
 import pullsOpen from "./recorded/pulls-open.json";
 import files7 from "./recorded/files-7.json";
@@ -130,6 +131,18 @@ describe("sync job", () => {
     expect((await env.DB.prepare("SELECT number, state, merged_at FROM pull_requests WHERE repo_id = ?1 AND number IN (3, 4) ORDER BY number").bind(repoId).all()).results).toEqual([
       { number: 3, state: "closed", merged_at: "2026-11-20T10:00:00Z" },
       { number: 4, state: "closed", merged_at: null },
+    ]);
+  });
+
+  it("stores each file's diff, and leaves it empty when GitHub sends none or it is too large", async () => {
+    const { projectId, repoId } = await setup();
+    files[9] = [{ filename: "huge.sql", status: "modified", additions: 1, deletions: 0, patch: "@@ -1 +1 @@\n+" + "x".repeat(MAX_PATCH_CHARS) } as never];
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    const patches = (await env.DB.prepare("SELECT path, patch FROM pr_files p JOIN pull_requests r ON r.id = p.pull_request_id WHERE r.repo_id = ?1 ORDER BY path").bind(repoId).all()).results;
+    expect(patches).toEqual([
+      { path: "huge.sql", patch: null },
+      { path: "src/checkout/coupon.ts", patch: null },
+      { path: "src/checkout/pay.ts", patch: expect.stringContaining("+  const discounted = applyCoupon(total, coupon);") },
     ]);
   });
 
