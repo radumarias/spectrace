@@ -1,0 +1,605 @@
+{
+ "id": "s1",
+ "repo": "acme/shop",
+ "path": "spec/checkout.md",
+ "root": "",
+ "area": "",
+ "flow": "checkout",
+ "title": "Checkout",
+ "steps": 5,
+ "requirements": 9,
+ "tested": 7,
+ "errors": 0,
+ "edges": [
+  {
+   "from": "cart",
+   "label": "start",
+   "to": "details"
+  },
+  {
+   "from": "details",
+   "label": "pay",
+   "to": "pay"
+  },
+  {
+   "from": "pay",
+   "label": "ok",
+   "to": "paid"
+  },
+  {
+   "from": "pay",
+   "label": "declined",
+   "to": "failed"
+  },
+  {
+   "from": "failed",
+   "label": "retry",
+   "to": "pay"
+  }
+ ],
+ "indexedAt": "2026-11-21T18:00:00Z",
+ "source": "# Checkout {#checkout}\n\n```mermaid\nflowchart LR\n  cart[Cart]\n  details[Details]\n  pay[Pay]\n  paid[Paid]\n  failed[Declined]\n\n  cart -->|start| details\n  details -->|pay| pay\n  pay -->|ok| paid\n  pay -->|declined| failed\n  failed -->|retry| pay\n\n  click cart href \"spec://checkout.cart\"\n  click details href \"spec://checkout.details\"\n  click pay href \"spec://checkout.pay\"\n  click paid href \"spec://checkout.paid\"\n  click failed href \"spec://checkout.failed\"\n```\n\n## Cart {#checkout.cart}\n\n- WHEN the cart is empty THE SYSTEM SHALL disable the checkout button. {#r1}\n- WHEN an item is out of stock THE SYSTEM SHALL mark it and keep the rest. {#r2}\n\n> @flow Stock is checked again at checkout because the catalog cache can be up to a minute old.\n\n## Details {#checkout.details}\n\n- WHEN the address is invalid THE SYSTEM SHALL show which field is wrong. {#r1}\n- WHEN the user is signed in THE SYSTEM SHALL prefill their saved details. {#r2}\n\n> @flow Prefill from the account, but never from a previous guest order on a shared device.\n\n## Pay {#checkout.pay}\n\n- WHEN the user pays THE SYSTEM SHALL charge the card exactly once. {#r1}\n- WHEN the gateway times out THE SYSTEM SHALL retry with the same idempotency key. {#r2}\n\n> @flow An idempotency key per order stops a gateway timeout from charging twice.\n\n## Declined payment {#checkout.failed}\n\n- WHEN a payment is declined THE SYSTEM SHALL show the reason. {#r1}\n- WHEN a decline goes past the retry limit of 3 THE SYSTEM SHALL cancel the order. {#r2}\n\n> @flow Why a retry limit? Card networks flag repeated retries as card testing.\n\n## Paid {#checkout.paid}\n\n- WHEN payment succeeds THE SYSTEM SHALL email a receipt. {#r1}\n\n> @flow The receipt is sent from the outbox so a crash after payment never loses it.\n",
+ "sha": "abc123",
+ "defaultBranch": "main",
+ "model": {
+  "flow": "checkout",
+  "title": {
+   "text": "Checkout",
+   "id": "checkout",
+   "line": 1,
+   "span": {
+    "start": 0,
+    "end": 22
+   }
+  },
+  "diagram": {
+   "direction": "LR",
+   "line": 3,
+   "span": {
+    "start": 24,
+    "end": 461
+   },
+   "body": {
+    "start": 35,
+    "end": 457
+   },
+   "header": {
+    "line": 4,
+    "span": {
+     "start": 35,
+     "end": 47
+    }
+   },
+   "nodes": [
+    {
+     "id": "cart",
+     "label": "Cart",
+     "line": 5,
+     "span": {
+      "start": 48,
+      "end": 60
+     }
+    },
+    {
+     "id": "details",
+     "label": "Details",
+     "line": 6,
+     "span": {
+      "start": 61,
+      "end": 79
+     }
+    },
+    {
+     "id": "pay",
+     "label": "Pay",
+     "line": 7,
+     "span": {
+      "start": 80,
+      "end": 90
+     }
+    },
+    {
+     "id": "paid",
+     "label": "Paid",
+     "line": 8,
+     "span": {
+      "start": 91,
+      "end": 103
+     }
+    },
+    {
+     "id": "failed",
+     "label": "Declined",
+     "line": 9,
+     "span": {
+      "start": 104,
+      "end": 122
+     }
+    }
+   ],
+   "edges": [
+    {
+     "from": "cart",
+     "label": "start",
+     "to": "details",
+     "line": 11,
+     "span": {
+      "start": 124,
+      "end": 149
+     }
+    },
+    {
+     "from": "details",
+     "label": "pay",
+     "to": "pay",
+     "line": 12,
+     "span": {
+      "start": 150,
+      "end": 172
+     }
+    },
+    {
+     "from": "pay",
+     "label": "ok",
+     "to": "paid",
+     "line": 13,
+     "span": {
+      "start": 173,
+      "end": 191
+     }
+    },
+    {
+     "from": "pay",
+     "label": "declined",
+     "to": "failed",
+     "line": 14,
+     "span": {
+      "start": 192,
+      "end": 218
+     }
+    },
+    {
+     "from": "failed",
+     "label": "retry",
+     "to": "pay",
+     "line": 15,
+     "span": {
+      "start": 219,
+      "end": 242
+     }
+    }
+   ],
+   "clicks": [
+    {
+     "node": "cart",
+     "target": "checkout.cart",
+     "line": 17,
+     "span": {
+      "start": 244,
+      "end": 284
+     }
+    },
+    {
+     "node": "details",
+     "target": "checkout.details",
+     "line": 18,
+     "span": {
+      "start": 285,
+      "end": 331
+     }
+    },
+    {
+     "node": "pay",
+     "target": "checkout.pay",
+     "line": 19,
+     "span": {
+      "start": 332,
+      "end": 370
+     }
+    },
+    {
+     "node": "paid",
+     "target": "checkout.paid",
+     "line": 20,
+     "span": {
+      "start": 371,
+      "end": 411
+     }
+    },
+    {
+     "node": "failed",
+     "target": "checkout.failed",
+     "line": 21,
+     "span": {
+      "start": 412,
+      "end": 456
+     }
+    }
+   ],
+   "comments": []
+  },
+  "sections": [
+   {
+    "id": "checkout.cart",
+    "node": "cart",
+    "title": "Cart",
+    "line": 24,
+    "heading": {
+     "start": 462,
+     "end": 486
+    },
+    "span": {
+     "start": 462,
+     "end": 744
+    },
+    "requirements": [
+     {
+      "tag": "r1",
+      "condition": "the cart is empty",
+      "response": "disable the checkout button",
+      "line": 26,
+      "end_line": 26,
+      "span": {
+       "start": 488,
+       "end": 564
+      }
+     },
+     {
+      "tag": "r2",
+      "condition": "an item is out of stock",
+      "response": "mark it and keep the rest",
+      "line": 27,
+      "end_line": 27,
+      "span": {
+       "start": 565,
+       "end": 645
+      }
+     }
+    ],
+    "flow": {
+     "text": "Stock is checked again at checkout because the catalog cache can be up to a minute old.",
+     "line": 29,
+     "end_line": 29,
+     "span": {
+      "start": 647,
+      "end": 742
+     }
+    }
+   },
+   {
+    "id": "checkout.details",
+    "node": "details",
+    "title": "Details",
+    "line": 31,
+    "heading": {
+     "start": 744,
+     "end": 774
+    },
+    "span": {
+     "start": 744,
+     "end": 1031
+    },
+    "requirements": [
+     {
+      "tag": "r1",
+      "condition": "the address is invalid",
+      "response": "show which field is wrong",
+      "line": 33,
+      "end_line": 33,
+      "span": {
+       "start": 776,
+       "end": 855
+      }
+     },
+     {
+      "tag": "r2",
+      "condition": "the user is signed in",
+      "response": "prefill their saved details",
+      "line": 34,
+      "end_line": 34,
+      "span": {
+       "start": 856,
+       "end": 936
+      }
+     }
+    ],
+    "flow": {
+     "text": "Prefill from the account, but never from a previous guest order on a shared device.",
+     "line": 36,
+     "end_line": 36,
+     "span": {
+      "start": 938,
+      "end": 1029
+     }
+    }
+   },
+   {
+    "id": "checkout.pay",
+    "node": "pay",
+    "title": "Pay",
+    "line": 38,
+    "heading": {
+     "start": 1031,
+     "end": 1053
+    },
+    "span": {
+     "start": 1031,
+     "end": 1302
+    },
+    "requirements": [
+     {
+      "tag": "r1",
+      "condition": "the user pays",
+      "response": "charge the card exactly once",
+      "line": 40,
+      "end_line": 40,
+      "span": {
+       "start": 1055,
+       "end": 1128
+      }
+     },
+     {
+      "tag": "r2",
+      "condition": "the gateway times out",
+      "response": "retry with the same idempotency key",
+      "line": 41,
+      "end_line": 41,
+      "span": {
+       "start": 1129,
+       "end": 1217
+      }
+     }
+    ],
+    "flow": {
+     "text": "An idempotency key per order stops a gateway timeout from charging twice.",
+     "line": 43,
+     "end_line": 43,
+     "span": {
+      "start": 1219,
+      "end": 1300
+     }
+    }
+   },
+   {
+    "id": "checkout.failed",
+    "node": "failed",
+    "title": "Declined payment",
+    "line": 45,
+    "heading": {
+     "start": 1302,
+     "end": 1340
+    },
+    "span": {
+     "start": 1302,
+     "end": 1582
+    },
+    "requirements": [
+     {
+      "tag": "r1",
+      "condition": "a payment is declined",
+      "response": "show the reason",
+      "line": 47,
+      "end_line": 47,
+      "span": {
+       "start": 1342,
+       "end": 1410
+      }
+     },
+     {
+      "tag": "r2",
+      "condition": "a decline goes past the retry limit of 3",
+      "response": "cancel the order",
+      "line": 48,
+      "end_line": 48,
+      "span": {
+       "start": 1411,
+       "end": 1499
+      }
+     }
+    ],
+    "flow": {
+     "text": "Why a retry limit? Card networks flag repeated retries as card testing.",
+     "line": 50,
+     "end_line": 50,
+     "span": {
+      "start": 1501,
+      "end": 1580
+     }
+    }
+   },
+   {
+    "id": "checkout.paid",
+    "node": "paid",
+    "title": "Paid",
+    "line": 52,
+    "heading": {
+     "start": 1582,
+     "end": 1606
+    },
+    "span": {
+     "start": 1582,
+     "end": 1758
+    },
+    "requirements": [
+     {
+      "tag": "r1",
+      "condition": "payment succeeds",
+      "response": "email a receipt",
+      "line": 54,
+      "end_line": 54,
+      "span": {
+       "start": 1608,
+       "end": 1671
+      }
+     }
+    ],
+    "flow": {
+     "text": "The receipt is sent from the outbox so a crash after payment never loses it.",
+     "line": 56,
+     "end_line": 56,
+     "span": {
+      "start": 1673,
+      "end": 1757
+     }
+    }
+   }
+  ],
+  "head": {
+   "start": 0,
+   "end": 462
+  }
+ },
+ "diagnostics": [],
+ "anchors": [
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 3,
+   "class": "code",
+   "path": "src/cart.rs",
+   "target": "checkout.cart",
+   "excerpt": "#[spec(\"checkout.cart\")]\npub fn start_checkout(cart: &Cart) -> Result<State> {\n    /// @flow checkout.cart: re-check stock, cache may be stale\n    ensure!(!cart.items.is_empty(), Error::EmptyCart);\n    let marked = inventory::mark_out_of_stock(&cart.items);\n    Ok(State::Details { cart: marked })\n}"
+  },
+  {
+   "language": "rust",
+   "kind": "flow",
+   "note": "re-check stock, cache may be stale",
+   "line": 5,
+   "class": "code",
+   "path": "src/cart.rs",
+   "target": "checkout.cart",
+   "excerpt": "/// @flow checkout.cart: re-check stock, cache may be stale"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 5,
+   "class": "code",
+   "path": "src/checkout.rs",
+   "target": "checkout.details",
+   "excerpt": "#[spec(\"checkout.details\")]\npub fn collect_details(o: &mut Order, form: Form) -> Result<State> {\n    let addr = Address::parse(&form.address).map_err(|e| Error::Field(e.field))?;\n    o.address = Some(addr);\n    Ok(State::Paying)\n}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 12,
+   "class": "code",
+   "path": "src/checkout.rs",
+   "target": "checkout.pay",
+   "excerpt": "#[spec(\"checkout.pay\")]\npub async fn pay(o: &mut Order) -> Result<State> {\n    // @flow checkout.pay: one idempotency key per order\n    let key = o.idempotency_key();\n    match gateway::charge(o.total, &key).await? {\n        Charge::Ok(id) => {\n            o.charge_id = Some(id);\n            Ok(State::Paid)\n        }\n        Charge::Declined(why) => Ok(on_declined(o, why)),\n    }\n}"
+  },
+  {
+   "language": "rust",
+   "kind": "flow",
+   "note": "one idempotency key per order",
+   "line": 14,
+   "class": "code",
+   "path": "src/checkout.rs",
+   "target": "checkout.pay",
+   "excerpt": "// @flow checkout.pay: one idempotency key per order"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 25,
+   "class": "code",
+   "path": "src/checkout.rs",
+   "target": "checkout.paid",
+   "excerpt": "#[spec(\"checkout.paid\")]\npub fn on_paid(o: &mut Order) -> State {\n    outbox::push(Email::Receipt(o.id));\n    o.paid_at = Some(Utc::now());\n    State::Paid\n}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 32,
+   "class": "code",
+   "path": "src/checkout.rs",
+   "target": "checkout.failed",
+   "excerpt": "#[spec(\"checkout.failed\")]\npub fn on_declined(o: &mut Order, why: Decline) -> State {\n    // @flow checkout.failed: cap retries, then cancel\n    o.retries += 1;\n    if o.retries > MAX_RETRIES {\n        return State::Cancelled { reason: why };\n    }\n    State::Declined { reason: why }\n}"
+  },
+  {
+   "language": "rust",
+   "kind": "flow",
+   "note": "cap retries, then cancel",
+   "line": 34,
+   "class": "code",
+   "path": "src/checkout.rs",
+   "target": "checkout.failed",
+   "excerpt": "// @flow checkout.failed: cap retries, then cancel"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 5,
+   "class": "test",
+   "path": "tests/checkout.rs",
+   "target": "checkout.cart/r1",
+   "excerpt": "#[spec(\"checkout.cart/r1\")]\nfn cart_empty_disables_checkout() {}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 9,
+   "class": "test",
+   "path": "tests/checkout.rs",
+   "target": "checkout.cart/r2",
+   "excerpt": "#[spec(\"checkout.cart/r2\")]\nfn out_of_stock_is_marked() {}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 13,
+   "class": "test",
+   "path": "tests/checkout.rs",
+   "target": "checkout.pay/r1",
+   "excerpt": "#[spec(\"checkout.pay/r1\")]\nfn charges_once() {}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 17,
+   "class": "test",
+   "path": "tests/checkout.rs",
+   "target": "checkout.pay/r2",
+   "excerpt": "#[spec(\"checkout.pay/r2\")]\nfn timeout_is_idempotent() {}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 21,
+   "class": "test",
+   "path": "tests/checkout.rs",
+   "target": "checkout.paid/r1",
+   "excerpt": "#[spec(\"checkout.paid/r1\")]\nfn receipt_sent_from_outbox() {}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 25,
+   "class": "test",
+   "path": "tests/checkout.rs",
+   "target": "checkout.failed/r1",
+   "excerpt": "#[spec(\"checkout.failed/r1\")]\nfn shows_decline_reason() {}"
+  },
+  {
+   "language": "rust",
+   "kind": "spec",
+   "note": null,
+   "line": 29,
+   "class": "test",
+   "path": "tests/checkout.rs",
+   "target": "checkout.failed/r2",
+   "excerpt": "#[spec(\"checkout.failed/r2\")]\nfn retry_limit_is_3() {}"
+  }
+ ]
+}
