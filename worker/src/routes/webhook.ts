@@ -4,7 +4,7 @@
 // (`X-Hub-Signature-256: sha256=<hex HMAC of the raw body>`). A delivery with
 // a missing or wrong signature is refused with 401 before anything is read.
 // Handled events update the stored pull requests (`pull_request`,
-// `pull_request_review`, `check_suite`, `push`); each stored change is
+// `pull_request_review`, `check_suite`, `check_run`, `push`); each stored change is
 // announced to the project's live feed as a `pr.updated` or `repo.pushed`
 // event, and a PR whose files are out of date queues a `sync` job.
 //
@@ -17,6 +17,7 @@ import { AppError, ErrorBody } from "../error";
 import { emit, enqueueJob } from "../jobs/queue";
 import { SYNC_KIND } from "../jobs/sync";
 import { log } from "../log";
+import { checkRunStatement, type GhCheckRun } from "../checks";
 import { upsertPullFromWebhook, type GhPull } from "../pulls";
 
 const MAX_BODY_BYTES = 26 * 1024 * 1024; // GitHub's own cap is 25 MB
@@ -29,7 +30,7 @@ const route = createRoute({
   summary: "GitHub App webhook receiver",
   description:
     "Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. " +
-    "Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.",
+    "Handles `pull_request`, `pull_request_review`, `check_suite`, `check_run` and `push`; other events are acknowledged and ignored.",
   responses: {
     200: { description: "Accepted (`handled` is false for events we do not use)", content: { "application/json": { schema: Result } } },
     400: { description: "Not a JSON payload", content: { "application/json": { schema: ErrorBody } } },
@@ -66,6 +67,7 @@ interface Payload {
   pull_request?: GhPull;
   review?: { id: number; user: { login: string } | null; state: string; body: string | null; commit_id: string; submitted_at: string | null };
   check_suite?: { id: number; head_sha: string; status: string; conclusion: string | null; updated_at: string; app?: { name?: string } | null };
+  check_run?: GhCheckRun;
   ref?: string;
   before?: string;
   after?: string;
@@ -132,6 +134,17 @@ async function onCheckSuite(env: Bindings, repo: RepoRow, p: Payload): Promise<C
   return results.map((r) => prChange(repo, r.number, `check_suite.${p.action ?? "updated"}`));
 }
 
+async function onCheckRun(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[] | null> {
+  const run = p.check_run;
+  if (!run) return null;
+  const res = await checkRunStatement(env, repo.id, run).run();
+  if (res.meta.changes === 0) return [];
+  const { results } = await env.DB.prepare("SELECT number FROM pull_requests WHERE repo_id = ?1 AND head_sha = ?2 ORDER BY number")
+    .bind(repo.id, run.head_sha)
+    .all<{ number: number }>();
+  return results.map((r) => prChange(repo, r.number, `check_run.${p.action ?? "updated"}`));
+}
+
 const BRANCH = "refs/heads/";
 
 async function onPush(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[] | null> {
@@ -157,6 +170,7 @@ const HANDLERS: Record<string, (env: Bindings, repo: RepoRow, p: Payload) => Pro
   pull_request: onPullRequest,
   pull_request_review: onReview,
   check_suite: onCheckSuite,
+  check_run: onCheckRun,
   push: onPush,
 };
 

@@ -88,6 +88,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description GitHub sign-in is not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
@@ -277,7 +286,7 @@ export interface paths {
                     };
                 };
                 /** @description App not configured */
-                500: {
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -426,7 +435,7 @@ export interface paths {
         put?: never;
         /**
          * GitHub App webhook receiver
-         * @description Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.
+         * @description Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite`, `check_run` and `push`; other events are acknowledged and ignored.
          */
         post: {
             parameters: {
@@ -1751,6 +1760,13 @@ export interface components {
             body: string;
             headSha: string;
             files: components["schemas"]["PullFile"][];
+            /** @description CI check runs of the head commit, failures first. */
+            checks: components["schemas"]["CheckRun"][];
+            /**
+             * @description `none` when no check run is stored (not synced, or the repo has no CI).
+             * @enum {string}
+             */
+            checksState: "none" | "pending" | "passing" | "failing";
         };
         PullFile: {
             path: string;
@@ -1758,6 +1774,16 @@ export interface components {
             previousPath: string | null;
             additions: number;
             deletions: number;
+        };
+        CheckRun: {
+            name: string;
+            /** @enum {string} */
+            status: "queued" | "in_progress" | "completed";
+            /** @description GitHub's: success, failure, neutral, cancelled, skipped, timed_out, action_required, stale; null until completed. */
+            conclusion: string | null;
+            url: string;
+            startedAt: string | null;
+            completedAt: string | null;
         };
         PullReview: {
             id: number;

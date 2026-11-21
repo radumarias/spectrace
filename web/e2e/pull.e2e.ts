@@ -8,7 +8,7 @@ const PULL = {
   id: "pr-1", repo: "acme/shop", number: 58, title: "Checkout: show decline reason inline", author: "ana", state: "open", draft: false,
   needsYou: true, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
   additions: 36, deletions: 6, changedFiles: 2, createdAt: "2026-11-21T10:00:00Z", updatedAt: "2026-11-21T11:00:00Z", mergedAt: null,
-  syncedAt: "2026-11-21T11:05:00Z", headSha: "abc123",
+  syncedAt: "2026-11-21T11:05:00Z", headSha: "abc123", checks: [], checksState: "none",
   body: "The declined screen shows why the card was declined, next to the retry button.",
   files: [
     { path: "src/checkout/Declined.tsx", status: "modified", previousPath: null, additions: 31, deletions: 6 },
@@ -26,7 +26,7 @@ test("a pull request shows its header, description and files", async ({ page }) 
   await page.goto("/pr/pr-1");
 
   await expect(page.getByRole("heading", { name: PULL.title })).toBeVisible();
-  await expect(page.getByText("checks not synced yet")).toBeVisible();
+  await expect(page.getByText("no checks")).toBeVisible();
   await expect(page.getByText(PULL.body)).toBeVisible();
   await expectNoHorizontalScroll(page);
 

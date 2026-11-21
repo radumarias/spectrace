@@ -8,6 +8,7 @@ import { JOBS_QUEUE, type JobMessage } from "../src/jobs/queue";
 import pullsOpen from "./recorded/pulls-open.json";
 import files7 from "./recorded/files-7.json";
 import files9 from "./recorded/files-9.json";
+import checkRuns7 from "./recorded/check-runs-7.json";
 
 // GitHub is never called: every request to the API host is answered from the
 // recorded responses in test/recorded/ (shaped like GitHub's own).
@@ -19,6 +20,8 @@ let requests: string[];
 let closed: Record<number, { merged_at: string | null }>;
 /** What `GET /pulls?state=closed` lists: recently closed pull requests, merged ones with `merged_at`. */
 let closedList: unknown[] = [];
+/** Check runs by head commit, as `GET /commits/{sha}/check-runs` answers; a missing commit answers 403 (App without "Checks: read"). */
+let checkRuns: Record<string, unknown[]>;
 /** The account the App is installed on for acme/shop, as `GET /repos/acme/shop/installation` answers; null = not installed. */
 let installedOn: { id: number; account: { id: number; login: string; type: string } } | null = null;
 
@@ -41,6 +44,8 @@ function mockGithub() {
     if (path === "/repos/acme/shop/pulls") return Response.json(slice(url.searchParams.get("state") === "closed" ? closedList : pulls));
     const f = /^\/repos\/acme\/shop\/pulls\/(\d+)\/files$/.exec(path);
     if (f) return Response.json(slice(files[Number(f[1])] ?? []));
+    const cr = /^\/repos\/acme\/shop\/commits\/([^/]+)\/check-runs$/.exec(path);
+    if (cr) return checkRuns[cr[1]!] ? Response.json({ total_count: checkRuns[cr[1]!]!.length, check_runs: checkRuns[cr[1]!] }) : Response.json({}, { status: 403 });
     const d = /^\/repos\/acme\/shop\/pulls\/(\d+)$/.exec(path);
     if (d && closed[Number(d[1])]) return Response.json({ number: Number(d[1]), state: "closed", ...closed[Number(d[1])] });
     return Response.json({ message: "Not Found" }, { status: 404 });
@@ -93,6 +98,7 @@ beforeEach(() => {
   closed = {};
   closedList = [];
   installedOn = null;
+  checkRuns = { aaa111: structuredClone(checkRuns7.check_runs) };
   files = { 7: structuredClone(files7), 9: structuredClone(files9) };
   mockGithub();
 });
@@ -125,6 +131,22 @@ describe("sync job", () => {
       { number: 3, state: "closed", merged_at: "2026-11-20T10:00:00Z" },
       { number: 4, state: "closed", merged_at: null },
     ]);
+  });
+
+  it("stores the check runs of each open PR's head commit, and carries on when GitHub refuses them", async () => {
+    const { projectId, repoId } = await setup();
+    // PR 9 (head bbb222) has no entry, so GitHub answers 403 for it.
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    const stored = () => env.DB.prepare("SELECT head_sha, name, status, conclusion FROM pr_check_runs WHERE repo_id = ?1 ORDER BY github_check_run_id").bind(repoId).all();
+    expect((await stored()).results).toEqual([
+      { head_sha: "aaa111", name: "Rust (fmt, clippy, test)", status: "completed", conclusion: "success" },
+      { head_sha: "aaa111", name: "Web (tsc, vitest)", status: "completed", conclusion: "failure" },
+      { head_sha: "aaa111", name: "E2E", status: "in_progress", conclusion: null },
+    ]);
+    // Syncing again after the run finished updates it in place.
+    checkRuns.aaa111 = checkRuns.aaa111!.map((r) => ((r as { id: number }).id === 13 ? { ...(r as object), status: "completed", conclusion: "success" } : r));
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    expect((await stored()).results[2]).toEqual({ head_sha: "aaa111", name: "E2E", status: "completed", conclusion: "success" });
   });
 
   it("stores the open pull requests and their files", async () => {

@@ -398,12 +398,31 @@
                 "items": {
                   "$ref": "#/components/schemas/PullFile"
                 }
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CheckRun"
+                },
+                "description": "CI check runs of the head commit, failures first."
+              },
+              "checksState": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "pending",
+                  "passing",
+                  "failing"
+                ],
+                "description": "`none` when no check run is stored (not synced, or the repo has no CI)."
               }
             },
             "required": [
               "body",
               "headSha",
-              "files"
+              "files",
+              "checks",
+              "checksState"
             ]
           }
         ]
@@ -434,6 +453,46 @@
           "previousPath",
           "additions",
           "deletions"
+        ]
+      },
+      "CheckRun": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed"
+            ]
+          },
+          "conclusion": {
+            "type": "string",
+            "nullable": true,
+            "description": "GitHub's: success, failure, neutral, cancelled, skipped, timed_out, action_required, stale; null until completed."
+          },
+          "url": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "conclusion",
+          "url",
+          "startedAt",
+          "completedAt"
         ]
       },
       "PullReview": {
@@ -542,6 +601,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "GitHub sign-in is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -572,6 +641,14 @@
             },
             "required": false,
             "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "setup_action",
             "in": "query"
           }
         ],
@@ -666,7 +743,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "App not configured",
             "content": {
               "application/json": {
@@ -797,7 +874,7 @@
     "/api/github/webhook": {
       "post": {
         "summary": "GitHub App webhook receiver",
-        "description": "Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.",
+        "description": "Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite`, `check_run` and `push`; other events are acknowledged and ignored.",
         "responses": {
           "200": {
             "description": "Accepted (`handled` is false for events we do not use)",

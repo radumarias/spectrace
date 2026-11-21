@@ -15,7 +15,7 @@ const PULL = {
   id: "pr-1", repo: "acme/shop", number: 58, title: "Checkout: show decline reason inline", author: "ana", state: "open", draft: false,
   needsYou: true, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
   additions: 36, deletions: 6, changedFiles: 2, createdAt: "x", updatedAt: "x", mergedAt: null, syncedAt: "x",
-  body: "The declined screen shows why the card was declined.", headSha: "abc",
+  body: "The declined screen shows why the card was declined.", headSha: "abc", checks: [], checksState: "none",
   files: [
     { path: "src/checkout/Declined.tsx", status: "modified", previousPath: null, additions: 31, deletions: 6 },
     { path: "src/checkout/Declined.test.tsx", status: "added", previousPath: null, additions: 5, deletions: 0 },
@@ -74,7 +74,7 @@ it("shows the header, the description, and the files", async () => {
   const user = userEvent.setup();
   at("/pr/pr-1");
   expect(await screen.findByRole("heading", { name: PULL.title })).toBeTruthy();
-  expect(screen.getByText("checks not synced yet")).toBeTruthy();
+  expect(screen.getByText("no checks")).toBeTruthy();
   expect(screen.getByText(PULL.body)).toBeTruthy();
 
   await user.click(screen.getByRole("tab", { name: "Files · 2" }));
@@ -147,4 +147,23 @@ it("says there is no description when the body is only comments", async () => {
   server({ ...PULL, body: "<!--\nTemplate help\n-->" });
   at("/pr/pr-1");
   expect(await screen.findByText("The author did not write a description.")).toBeTruthy();
+});
+
+it("shows the check runs and a summary of them", async () => {
+  server({
+    ...PULL,
+    checksState: "failing",
+    checks: [
+      { name: "Web (tsc, vitest)", status: "completed", conclusion: "failure", url: "https://github.com/acme/shop/actions/runs/1/job/2", startedAt: "x", completedAt: "x" },
+      { name: "E2E", status: "in_progress", conclusion: null, url: "", startedAt: "x", completedAt: null },
+      { name: "Rust", status: "completed", conclusion: "success", url: "", startedAt: "x", completedAt: "x" },
+    ],
+  });
+  at("/pr/pr-1");
+  expect(await screen.findByText("checks failing")).toBeTruthy();
+  const link = screen.getByRole("link", { name: "Web (tsc, vitest)" });
+  expect(link.getAttribute("href")).toContain("/actions/runs/1");
+  expect(within(link.closest("li")!).getByText("failure")).toBeTruthy();
+  expect(within(screen.getByText("E2E").closest("li")!).getByText("running")).toBeTruthy();
+  expect(within(screen.getByText("Rust").closest("li")!).getByText("passed")).toBeTruthy();
 });

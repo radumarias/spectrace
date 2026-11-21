@@ -6,6 +6,22 @@ import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
 import { Markdown, stripHtmlComments } from "../ui/Markdown";
 import { useToast } from "../ui/Toast";
 
+const CHECKS: Record<Pull["checksState"], { tone: PillTone; label: string }> = {
+  none: { tone: "idle", label: "no checks" },
+  pending: { tone: "warn", label: "checks running" },
+  passing: { tone: "ok", label: "checks passing" },
+  failing: { tone: "bad", label: "checks failing" },
+};
+
+function checkLine(c: Pull["checks"][number]): { tone: PillTone; label: string } {
+  if (c.status === "queued") return { tone: "idle", label: "queued" };
+  if (c.status === "in_progress") return { tone: "warn", label: "running" };
+  const k = c.conclusion ?? "";
+  if (k === "success") return { tone: "ok", label: "passed" };
+  if (k === "neutral" || k === "skipped") return { tone: "idle", label: k };
+  return { tone: "bad", label: k.replace(/_/g, " ") || "failed" };
+}
+
 const STATE: Record<Pull["state"], { tone: PillTone; label: string }> = {
   open: { tone: "acc", label: "open" },
   merged: { tone: "ok", label: "merged" },
@@ -54,7 +70,7 @@ export function PullDetail() {
           <div className="btns" style={{ gap: 6 }}>
             <Pill tone={s.tone}>{s.label}</Pill>
             {p.draft && <Pill tone="idle">draft</Pill>}
-            <Pill tone="idle">checks not synced yet</Pill>
+            <Pill tone={CHECKS[p.checksState].tone}>{CHECKS[p.checksState].label}</Pill>
             <Pill tone="idle">{p.changedFiles} {p.changedFiles === 1 ? "file" : "files"} changed</Pill>
           </div>
         </div>
@@ -84,7 +100,21 @@ function Walkthrough({ pull: p }: { pull: Pull }) {
       <div className="aside stack">
         <Card className="stack">
           <span className="lbl">Checks</span>
-          <p className="sub" style={{ fontSize: 13 }}>CI results show up here once they are synced from GitHub.</p>
+          {p.checks.length === 0 ? (
+            <p className="sub" style={{ fontSize: 13 }}>No check runs for this commit yet. Pull from GitHub on the pull requests page to read them.</p>
+          ) : (
+            <ul className="checks">
+              {p.checks.map((c) => {
+                const line = checkLine(c);
+                return (
+                  <li key={c.name}>
+                    {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : <span>{c.name}</span>}
+                    <Pill tone={line.tone}>{line.label}</Pill>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Card>
         <Card className="stack">
           <span className="lbl">Size</span>

@@ -195,6 +195,33 @@ describe("GET /api/projects/{id}/pulls/{pullId}", () => {
     });
   });
 
+  it("lists the check runs of the head commit, failures first, with one run per name", async () => {
+    const s = await seed();
+    const id = `pr-${s.shop}-1`;
+    const repo = (await env.DB.prepare("SELECT repo_id FROM pull_requests WHERE id = ?1").bind(id).first<{ repo_id: string }>())!.repo_id;
+    const run = (rid: number, name: string, status: string, conclusion: string | null, sha = "sha") =>
+      env.DB.prepare("INSERT INTO pr_check_runs (repo_id, github_check_run_id, head_sha, name, status, conclusion, html_url) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'https://x/' || ?2)").bind(repo, rid, sha, name, status, conclusion);
+    await env.DB.batch([
+      run(1, "build", "completed", "success"),
+      run(2, "test", "completed", "failure"),
+      run(3, "test", "completed", "success"), // a re-run of "test" replaces the failed one
+      run(4, "deploy", "in_progress", null),
+      run(5, "lint", "completed", "failure"),
+      run(6, "old", "completed", "failure", "other-sha"),
+    ]);
+    const body = (await (await call(`/api/projects/${s.projectId}/pulls/${id}`, s.cookie)).json()) as { checks: { name: string }[]; checksState: string };
+    expect(body.checks.map((c) => c.name)).toEqual(["lint", "deploy", "build", "test"]);
+    expect(body.checksState).toBe("failing");
+    await env.DB.prepare("DELETE FROM pr_check_runs WHERE name = 'lint'").run();
+    expect(((await (await call(`/api/projects/${s.projectId}/pulls/${id}`, s.cookie)).json()) as { checksState: string }).checksState).toBe("pending");
+  });
+
+  it("says there are no checks when none are stored", async () => {
+    const s = await seed();
+    const body = (await (await call(`/api/projects/${s.projectId}/pulls/pr-${s.shop}-1`, s.cookie)).json()) as { checks: unknown[]; checksState: string };
+    expect(body).toMatchObject({ checks: [], checksState: "none" });
+  });
+
   it("is 404 for an unknown PR, a PR of another project, and a stranger", async () => {
     const s = await seed();
     const t = await seed();
