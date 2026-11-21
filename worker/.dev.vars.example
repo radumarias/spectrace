@@ -1,0 +1,7 @@
+# Copy to .dev.vars (git-ignored) for `just dev`. Create an OAuth app at
+# https://github.com/settings/developers with callback URL
+# http://localhost:5173/api/auth/github/callback
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+# Where the browser reaches the app; the callback is PUBLIC_URL + /api/auth/github/callback
+PUBLIC_URL=http://localhost:5173

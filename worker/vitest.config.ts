@@ -9,7 +9,17 @@ export default defineConfig(async () => {
     plugins: [
       cloudflareTest({
         wrangler: { configPath: "./wrangler.toml" },
-        miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+        miniflare: {
+          bindings: {
+            TEST_MIGRATIONS: migrations,
+            // Sign-in tests: GitHub is mocked in test/auth.test.ts, never called.
+            GITHUB_CLIENT_ID: "cid",
+            GITHUB_CLIENT_SECRET: "shh",
+            PUBLIC_URL: "http://localhost:5173",
+            GITHUB_OAUTH_URL: "http://github.test",
+            GITHUB_API_URL: "http://api.github.test",
+          },
+        },
       }),
     ],
     test: { setupFiles: ["./test/setup.ts"] },
