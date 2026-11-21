@@ -58,3 +58,6 @@ details.flash{outline:2px solid var(--accent);outline-offset:4px}
   .fs-bar h2{font-size:15px}
   .fs-extra{display:none}
 }
+.spec-dia .pele-node[data-st=bad] :is(rect,polygon,circle){fill:var(--bad-soft);stroke:var(--bad)}
+.spec-dia .pele-node[data-st=root] :is(rect,polygon,circle){fill:var(--fg);stroke:var(--fg)}
+.spec-dia .pele-node[data-st=root] text{fill:var(--bg)}

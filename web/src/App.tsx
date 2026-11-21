@@ -9,6 +9,7 @@ import { PullRequests } from "./pages/PullRequests";
 import { RequireAuth } from "./shell/RequireAuth";
 import { Shell } from "./shell/Shell";
 import { SpecIndex, SpecPage } from "./pages/Spec";
+import { AppMap } from "./pages/AppMap";
 import { TITLES } from "./shell/nav";
 import { ToastProvider } from "./ui/Toast";
 
@@ -24,9 +25,10 @@ export function App() {
           <Route path="project" element={<ProjectSettings />} />
           <Route path="prs" element={<PullRequests />} />
           <Route path="pr/:pullId" element={<PullDetail />} />
+          <Route path="map" element={<AppMap />} />
           <Route path="spec" element={<SpecIndex />} />
           <Route path="spec/:specId" element={<SpecPage />} />
-          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project", "prs", "spec"].includes(r)).map((r) => (
+          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project", "prs", "spec", "map"].includes(r)).map((r) => (
             <Route key={r} path={r} element={<Page route={r} />} />
           ))}
           <Route path="*" element={<Navigate to="/projects" replace />} />

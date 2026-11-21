@@ -20,8 +20,8 @@ export interface DiagramProps {
   /** Mermaid flowchart text. */
   source: string;
   label: string;
-  /** Node id to status, for colouring. Nodes not listed keep pele's colours. */
-  status?: Record<string, StepStatus>;
+  /** Node id to status (`ok`, `warn`, `idle`, `bad`, or `root` for a map's centre), for colouring. Nodes not listed keep pele's colours. */
+  status?: Record<string, StepStatus | "bad" | "root">;
   selected?: string | null;
   /** Called with the node id when a node is clicked or activated by keyboard. */
   onSelect?: (node: string) => void;
