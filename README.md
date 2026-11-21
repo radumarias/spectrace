@@ -32,10 +32,11 @@ Create a GitHub App at https://github.com/settings/apps/new:
 
 - Callback URL `http://localhost:5173/api/auth/github/callback`; tick **Request user authorization (OAuth) during installation**.
 - Setup URL `http://localhost:5173/api/github/install/callback`; tick **Redirect on update**.
-- Repository permissions: Contents read, Pull requests read and write, Metadata read. Webhooks can stay off for now.
+- Repository permissions: Contents read, Pull requests read and write, Checks read, Metadata read. Subscribe to the events Pull request, Pull request review, Check suite and Push.
+- Webhook: tick **Active**, set the URL to `<PUBLIC_URL>/api/github/webhook` and a **Webhook secret** (a long random string). GitHub cannot reach `localhost`; to try it locally, tunnel port 5173 and use that URL.
 - After creating it, generate a **private key** (downloads a `.pem`) and note the **App ID** and the URL **slug**.
 
-Use the App's own **Client ID** and a generated **client secret** as `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, so sign-in and install share one app. Then add to `worker/.dev.vars`: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, and `GITHUB_APP_PRIVATE_KEY` (the PEM, with `\n` for line breaks if on one line). Sign in, open http://localhost:5173/api/github/install, install it on your account, and `GET /api/github/repos` lists the repositories. On Cloudflare set the same three with `wrangler secret put`, and change the App's two URLs to the deployed origin.
+Use the App's own **Client ID** and a generated **client secret** as `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, so sign-in and install share one app. Then add to `worker/.dev.vars`: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` (the PEM, with `\n` for line breaks if on one line) and `GITHUB_WEBHOOK_SECRET` (the webhook secret). Sign in, open http://localhost:5173/api/github/install, install it on your account, and `GET /api/github/repos` lists the repositories. On Cloudflare set the same four with `wrangler secret put`, and change the App's two URLs to the deployed origin.
 
 ## Deploy
 

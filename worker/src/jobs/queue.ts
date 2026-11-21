@@ -1,6 +1,6 @@
 import type { Bindings } from "../env";
-import { toEvent, type EventRow, type JobEvent } from "../events";
 import { AppError } from "../error";
+import { toEvent, type EventRow, type JobEvent } from "../events";
 import { log } from "../log";
 
 export const JOBS_QUEUE = "spectrace-jobs";
@@ -70,7 +70,7 @@ export async function emit(env: Bindings, job: Pick<JobRow, "id" | "project_id">
   return ev;
 }
 
-/** Create a job, record "queued", and put it on the queue. If the queue refuses, the job is marked failed and an `upstream` error is thrown. */
+/** Create a job, announce it and put it on the queue. Throws `upstream` (and marks the job failed) when the queue refuses it. */
 export async function enqueueJob(env: Bindings, projectId: string, kind: string, target = "", maxAttempts = 3): Promise<JobRow> {
   const id = crypto.randomUUID();
   const row = await env.DB.prepare("INSERT INTO jobs (id, project_id, kind, target, max_attempts) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING *")

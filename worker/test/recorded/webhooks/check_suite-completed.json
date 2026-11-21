@@ -1,0 +1,22 @@
+{
+  "action": "completed",
+  "check_suite": {
+    "id": 777,
+    "head_sha": "ccc333",
+    "head_branch": "feat/coupon",
+    "status": "completed",
+    "conclusion": "success",
+    "updated_at": "2026-11-19T12:10:00Z",
+    "app": {
+      "name": "GitHub Actions"
+    },
+    "pull_requests": [
+      {
+        "number": 7
+      }
+    ]
+  },
+  "repository": {
+    "full_name": "acme/shop"
+  }
+}

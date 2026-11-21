@@ -97,6 +97,28 @@
           "html_url"
         ]
       },
+      "WebhookResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "event": {
+            "type": "string"
+          },
+          "handled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "event",
+          "handled"
+        ]
+      },
       "Project": {
         "type": "object",
         "properties": {
@@ -560,6 +582,54 @@
           },
           "502": {
             "description": "GitHub failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/github/webhook": {
+      "post": {
+        "summary": "GitHub App webhook receiver",
+        "description": "Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.",
+        "responses": {
+          "200": {
+            "description": "Accepted (`handled` is false for events we do not use)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a JSON payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Signature missing or wrong",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Webhook secret not configured",
             "content": {
               "application/json": {
                 "schema": {
