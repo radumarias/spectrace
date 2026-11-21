@@ -58,8 +58,8 @@ it("shows the root page without a sidebar", async () => {
 
 it("shows the sidebar and tab bar inside a project", async () => {
   fakeServer(USER);
-  at("/prs");
-  expect(await screen.findByRole("heading", { name: "Pull requests" })).toBeTruthy();
+  at("/map");
+  expect(await screen.findByRole("heading", { name: "App map" })).toBeTruthy();
   expect(screen.getByText("Quality")).toBeTruthy();
   expect(screen.getAllByRole("navigation", { name: "Main" })).toHaveLength(2);
 });
