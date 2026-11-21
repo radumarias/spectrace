@@ -112,6 +112,7 @@ export interface paths {
                     code?: string;
                     state?: string;
                     error?: string;
+                    setup_action?: string;
                 };
                 header?: never;
                 path?: never;

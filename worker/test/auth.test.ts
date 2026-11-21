@@ -133,4 +133,10 @@ describe("sign in with GitHub", () => {
     const doc = (await (await call("/api/openapi.json")).json()) as { paths: Record<string, unknown> };
     expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(["/api/me", "/api/auth/logout", "/api/auth/github/login", "/api/auth/github/callback"]));
   });
+
+  it("sends someone back from the App's install page to a normal sign-in", async () => {
+    const res = await exports.default.fetch(new Request("http://spectrace.test/api/auth/github/callback?code=x&installation_id=1&setup_action=install&state=nope", { redirect: "manual" }));
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("/api/auth/github/login");
+  });
 });
