@@ -12,6 +12,41 @@ pub struct Config {
     /// GitHub sign-in. `None` until `GITHUB_CLIENT_ID` and
     /// `GITHUB_CLIENT_SECRET` are both set; sign-in routes then answer 500.
     pub github: Option<GithubOAuth>,
+    /// GitHub App (install flow, installation tokens). `None` until
+    /// `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and a private key are set.
+    pub github_app: Option<GithubApp>,
+}
+
+/// GitHub App settings. The `*_url` fields exist so tests can point at a mock
+/// GitHub.
+#[derive(Clone)]
+pub struct GithubApp {
+    pub app_id: String,
+    /// The app's URL name: `https://github.com/apps/<slug>`.
+    pub slug: String,
+    /// RSA private key in PEM form, used to sign the app's JWTs.
+    pub private_key: String,
+    /// Secret GitHub signs webhook deliveries with. Read here so one place
+    /// holds all app settings; the webhook handler uses it.
+    pub webhook_secret: Option<String>,
+    /// `https://github.com` unless overridden by `GITHUB_OAUTH_URL`.
+    pub web_url: String,
+    /// `https://api.github.com` unless overridden by `GITHUB_API_URL`.
+    pub api_url: String,
+}
+
+impl std::fmt::Debug for GithubApp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GithubApp")
+            .field("app_id", &self.app_id)
+            .field("slug", &self.slug)
+            .field("private_key", &"<redacted>")
+            .field(
+                "webhook_secret",
+                &self.webhook_secret.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 /// GitHub OAuth app settings. The two `*_url` fields exist so tests can point
@@ -92,13 +127,59 @@ impl Config {
                 ))
             }
         };
+        let github_app = github_app_from_lookup(&get)?;
         Ok(Self {
             database_url,
             bind_addr,
             log_format,
             github,
+            github_app,
         })
     }
+}
+
+/// `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and the key (`GITHUB_APP_PRIVATE_KEY`,
+/// or `GITHUB_APP_PRIVATE_KEY_PATH` to a .pem file) go together: all or none.
+/// `\n` in `GITHUB_APP_PRIVATE_KEY` is turned into a newline so the key fits
+/// on one line of a `.env` file.
+fn github_app_from_lookup(
+    get: &impl Fn(&str) -> Option<String>,
+) -> Result<Option<GithubApp>, AppError> {
+    let non_empty = |k: &str| get(k).filter(|v| !v.trim().is_empty());
+    let key = match (
+        non_empty("GITHUB_APP_PRIVATE_KEY"),
+        non_empty("GITHUB_APP_PRIVATE_KEY_PATH"),
+    ) {
+        (Some(k), _) => Some(k.replace("\\n", "\n")),
+        (None, Some(path)) => Some(std::fs::read_to_string(&path).map_err(|e| {
+            AppError::Config(format!(
+                "cannot read GITHUB_APP_PRIVATE_KEY_PATH {path:?}: {e}"
+            ))
+        })?),
+        (None, None) => None,
+    };
+    let (app_id, slug) = (non_empty("GITHUB_APP_ID"), non_empty("GITHUB_APP_SLUG"));
+    let (Some(app_id), Some(slug), Some(private_key)) = (app_id.clone(), slug.clone(), key.clone())
+    else {
+        if app_id.is_none() && slug.is_none() && key.is_none() {
+            return Ok(None);
+        }
+        return Err(AppError::Config(
+            "set GITHUB_APP_ID, GITHUB_APP_SLUG and GITHUB_APP_PRIVATE_KEY (or _PATH), or none of them"
+                .into(),
+        ));
+    };
+    jsonwebtoken::EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+        AppError::Config(format!("GITHUB_APP_PRIVATE_KEY is not an RSA PEM key: {e}"))
+    })?;
+    Ok(Some(GithubApp {
+        app_id,
+        slug,
+        private_key,
+        webhook_secret: non_empty("GITHUB_WEBHOOK_SECRET"),
+        web_url: get("GITHUB_OAUTH_URL").unwrap_or_else(|| "https://github.com".into()),
+        api_url: get("GITHUB_API_URL").unwrap_or_else(|| "https://api.github.com".into()),
+    }))
 }
 
 #[cfg(test)]
@@ -155,6 +236,21 @@ mod tests {
         assert_eq!(g.public_url, "https://app.example");
         assert!(g.secure_cookies);
         assert_eq!(g.api_url, "https://api.github.com");
+    }
+
+    #[test]
+    fn github_app_is_optional_but_all_or_nothing() {
+        let c = cfg(&[("DATABASE_URL", "x")]).unwrap();
+        assert!(c.github_app.is_none());
+        assert!(cfg(&[("DATABASE_URL", "x"), ("GITHUB_APP_ID", "1")]).is_err());
+        // Set, but the key is not a key.
+        assert!(cfg(&[
+            ("DATABASE_URL", "x"),
+            ("GITHUB_APP_ID", "1"),
+            ("GITHUB_APP_SLUG", "spectrace"),
+            ("GITHUB_APP_PRIVATE_KEY", "not a key"),
+        ])
+        .is_err());
     }
 
     #[test]

@@ -13,3 +13,7 @@ curl localhost:8080/api/health
 ```
 
 Settings come from environment variables (see `.env.example`; copy it to `.env`): `DATABASE_URL` (required), `BIND_ADDR` or `PORT`, `LOG_FORMAT` (`pretty` or `json`), `RUST_LOG`, and for GitHub sign-in `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `PUBLIC_URL`. Migrations in `crates/server/migrations` run on startup.
+
+## GitHub App
+
+To list and read your repositories the server uses a GitHub App (see `.env.example` for how to create it and which settings to tick). Set `GITHUB_APP_ID`, `GITHUB_APP_SLUG` and the private key, sign in, then open `/api/github/install` in the browser to install the app. `GET /api/github/repos` lists the repositories of the installations you made.

@@ -1,13 +1,14 @@
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod github_app;
 pub mod routes;
 
 use axum::Router;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tower_http::trace::TraceLayer;
 
-pub use config::{Config, GithubOAuth};
+pub use config::{Config, GithubApp, GithubOAuth};
 pub use error::AppError;
 
 /// Shared state handed to every handler.
@@ -17,6 +18,9 @@ pub struct AppState {
     /// `None` when GitHub sign-in is not configured.
     pub github: Option<GithubOAuth>,
     pub http: reqwest::Client,
+    /// `None` when the GitHub App is not configured.
+    pub github_app: Option<GithubApp>,
+    pub(crate) app_tokens: github_app::TokenCache,
 }
 
 impl AppState {
@@ -25,7 +29,15 @@ impl AppState {
             db,
             github,
             http: reqwest::Client::new(),
+            github_app: None,
+            app_tokens: Default::default(),
         }
+    }
+
+    /// Turn on the GitHub App routes (install flow, repo list).
+    pub fn with_github_app(mut self, app: Option<GithubApp>) -> Self {
+        self.github_app = app;
+        self
     }
 }
 
@@ -43,6 +55,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .merge(routes::router())
         .merge(auth::router())
+        .merge(github_app::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
