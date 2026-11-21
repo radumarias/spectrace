@@ -59,3 +59,14 @@ export function useSaveSpec(projectId: string, specId: string) {
     },
   });
 }
+
+/** Adds a new spec file as a pull request (`POST …/specs/new`), for a whiteboard draft. */
+export function useNewSpec(projectId: string) {
+  return useMutation({
+    mutationFn: async (body: { repoId: string; path: string; source: string; summary: string[] }): Promise<SpecChangeOpened> => {
+      const { data, error } = await api.POST("/api/projects/{projectId}/specs/new", { params: { path: { projectId } }, body });
+      if (!data) throw message(error, "Could not add the spec.");
+      return data;
+    },
+  });
+}

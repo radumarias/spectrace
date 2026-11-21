@@ -579,3 +579,62 @@ describe("saving an edited spec", () => {
     expect(ghWrites).toEqual([]);
   });
 });
+
+describe("a new spec from a whiteboard", () => {
+  const DRAFT = "# Sign up {#sign_up}\n\n```mermaid\nflowchart LR\n  form[Form]\n  done[Done]\n\n  form -->|submit| done\n```\n\n## Form {#sign_up.form}\n\n## Done {#sign_up.done}\n";
+  const add = (cookie: string, projectId: string, body: unknown) => call(`/api/projects/${projectId}/specs/new`, cookie, { method: "POST", body: JSON.stringify(body) });
+
+  it("commits the new file on a branch and opens a pull request", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id); // learns the default branch, trunk
+    const repoId = project.repos[0]!.id;
+    const res = await add(cookie, project.id, { repoId, path: "spec/sign_up.md", source: DRAFT, summary: ["Drafted from the board Ideas"] });
+    expect(res.status).toBe(201);
+    const opened = (await res.json()) as { number: number; branch: string };
+    expect(opened.branch).toMatch(/^spectrace\/spec-sign_up-/);
+    expect(ghWrites.map((w) => w.req)).toEqual(["POST /git/refs", "PUT /contents/spec/sign_up.md", "POST /pulls"]);
+    expect(ghWrites[1]!.body).not.toHaveProperty("sha");
+    expect(ghWrites[2]!.body).toMatchObject({ title: "Spec: add Sign up", base: "trunk" });
+  });
+
+  it("refuses a bad path, a spec with errors, a file that exists, and another project's repo", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const repoId = project.repos[0]!.id;
+    expect((await add(cookie, project.id, { repoId, path: "docs/sign_up.md", source: DRAFT, summary: [] })).status).toBe(400);
+    expect((await add(cookie, project.id, { repoId, path: "spec/other.md", source: DRAFT, summary: [] })).status).toBe(400); // flow must equal the file name
+    expect((await add(cookie, project.id, { repoId, path: "spec/checkout.md", source: DRAFT.replaceAll("sign_up", "checkout"), summary: [] })).status).toBe(409);
+    const other = await setup(["acme/shop"]);
+    expect((await add(cookie, project.id, { repoId: other.project.repos[0]!.id, path: "spec/sign_up.md", source: DRAFT, summary: [] })).status).toBe(404);
+    expect(ghWrites).toEqual([]);
+  });
+});
+
+describe("boards", () => {
+  it("keeps a project's whiteboards for its owner", async () => {
+    const { cookie, project } = await setup([]);
+    const base = `/api/projects/${project.id}/boards`;
+    const blocks = [
+      { id: "b1", kind: "mermaid", text: "flowchart LR\n  a[A] --> b[B]" },
+      { id: "b2", kind: "note", text: "- A: WHEN x THE SYSTEM SHALL y." },
+    ];
+    const made = await call(base, cookie, { method: "POST", body: JSON.stringify({ title: "Ideas", blocks }) });
+    expect(made.status).toBe(201);
+    const board = (await made.json()) as { id: string; blocks: unknown[] };
+    expect(board.blocks).toEqual(blocks);
+
+    const put = await call(`${base}/${board.id}`, cookie, { method: "PUT", body: JSON.stringify({ title: "Sign up ideas", blocks: blocks.slice(0, 1) }) });
+    expect(put.status).toBe(200);
+    expect(await (await call(base, cookie)).json()).toEqual([{ id: board.id, title: "Sign up ideas", blocks: 1, updatedAt: expect.any(String) }]);
+    expect(((await (await call(`${base}/${board.id}`, cookie)).json()) as { blocks: unknown[] }).blocks).toEqual(blocks.slice(0, 1));
+
+    const dup = await call(`${base}/${board.id}`, cookie, { method: "PUT", body: JSON.stringify({ title: "x", blocks: [blocks[0], blocks[0]] }) });
+    expect(dup.status).toBe(400);
+    const other = await setup([]);
+    expect((await call(`${base}/${board.id}`, other.cookie)).status).toBe(404);
+    expect((await call(`/api/projects/${other.project.id}/boards/${board.id}`, other.cookie)).status).toBe(404);
+
+    expect((await call(`${base}/${board.id}`, cookie, { method: "DELETE" })).status).toBe(204);
+    expect((await call(`${base}/${board.id}`, cookie)).status).toBe(404);
+  });
+});

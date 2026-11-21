@@ -5,13 +5,13 @@
 // only where the edit is, and saving opens a pull request with that file.
 // Steps are laid out by pele, not by hand: the spec format has no positions.
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { useSaveSpec, type SpecChangeOpened, type SpecDetail } from "../api/specs";
+import type { SpecChangeOpened } from "../api/specs";
 import { Button, Pill } from "../ui/parts";
 import { useToast } from "../ui/Toast";
 import { editSpec, loadCore, parseSpec, type ParsedSpec, type SpecEdit } from "./core";
 import { Diagram } from "./Diagram";
 import { diffLines, hunks } from "./diff";
-import { mermaidOf, stepsOf } from "./model";
+import { mermaidOf } from "./model";
 
 type Applied = { source: string; summary: string };
 type Spec = ParsedSpec["spec"];
@@ -43,9 +43,21 @@ function Field({ value, label, onCommit, mono }: { value: string; label: string;
   return <input aria-label={label} value={v} autoComplete="off" className={mono ? "mono" : undefined} onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={key} />;
 }
 
-export function SpecEditor({ spec, projectId, onClose }: { spec: SpecDetail; projectId: string; onClose: () => void }) {
+/** What the editor works on: an indexed spec, or a new file drafted on a whiteboard (`draft`). */
+export interface EditorInput {
+  path: string;
+  title: string;
+  flow: string;
+  source: string;
+  /** Step statuses to colour unchanged steps by. */
+  status?: Record<string, "ok" | "warn" | "idle">;
+  /** A new file: saving is allowed before any edit, the diff is against nothing, and this line opens the summary. */
+  draft?: string;
+}
+
+export function SpecEditor({ spec, onSave, onClose }: { spec: EditorInput; onSave: (body: { source: string; summary: string[] }) => Promise<SpecChangeOpened>; onClose: () => void }) {
   const toast = useToast();
-  const save = useSaveSpec(projectId, spec.id);
+  const [saving, setSaving] = useState(false);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [applied, setApplied] = useState<Applied[]>([]);
@@ -69,7 +81,7 @@ export function SpecEditor({ spec, projectId, onClose }: { spec: SpecDetail; pro
   const selected = sel && now?.nodes.some((n) => n.id === sel) ? sel : (now?.nodes[0]?.id ?? null);
 
   const status = useMemo(() => {
-    const out: Record<string, "ok" | "warn" | "idle" | "new"> = Object.fromEntries(stepsOf(spec).map((s) => [s.node, s.status]));
+    const out: Record<string, "ok" | "warn" | "idle" | "new"> = { ...spec.status };
     if (!now || !base) return out;
     for (const n of now.nodes) {
       const was = base.nodes.find((b) => b.id === n.id);
@@ -79,8 +91,10 @@ export function SpecEditor({ spec, projectId, onClose }: { spec: SpecDetail; pro
     return out;
   }, [spec, now, base]);
 
-  const diff = useMemo(() => hunks(diffLines(spec.source, source)), [spec.source, source]);
+  const diff = useMemo(() => hunks(diffLines(spec.draft ? "" : spec.source, source)), [spec.draft, spec.source, source]);
   const changes = applied.length;
+  const summary = [...(spec.draft ? [spec.draft] : []), ...applied.map((a) => a.summary)];
+  const canSave = (changes > 0 || !!spec.draft) && !opened;
 
   const apply = (op: SpecEdit, summary: string, select?: string | null) => {
     try {
@@ -118,18 +132,21 @@ export function SpecEditor({ spec, projectId, onClose }: { spec: SpecDetail; pro
     setApplied((a) => a.slice(0, -1));
     setFrom(null);
   };
-  const submit = () =>
-    save.mutate(
-      { source, summary: applied.map((a) => a.summary) },
-      {
-        onSuccess: (pr) => {
-          setOpened(pr);
-          setConfirm(false);
-          toast(`Saved to ${spec.path}. Pull request #${pr.number} is open for review.`);
-        },
-        onError: (e) => toast(e.message),
+  const submit = () => {
+    setSaving(true);
+    onSave({ source, summary }).then(
+      (pr) => {
+        setSaving(false);
+        setOpened(pr);
+        setConfirm(false);
+        toast(`Saved to ${spec.path}. Pull request #${pr.number} is open for review.`);
+      },
+      (e: unknown) => {
+        setSaving(false);
+        toast(e instanceof Error ? e.message : String(e));
       },
     );
+  };
 
   if (failed) return <p className="err">The editor could not load spectrace-core: {failed}</p>;
   if (!now || !parsed) return <p className="sub">Loading the editor…</p>;
@@ -154,12 +171,12 @@ export function SpecEditor({ spec, projectId, onClose }: { spec: SpecDetail; pro
         small
         onClick={() => {
           onClose();
-          if (changes) toast("Edits discarded.");
+          if (changes && !opened) toast("Edits discarded.");
         }}
       >
         Discard
       </Button>
-      <Button small variant="primary" disabled={!changes || !!opened} onClick={() => setConfirm(true)}>
+      <Button small variant="primary" disabled={!canSave} onClick={() => setConfirm(true)}>
         Save{changes ? ` · ${changes} ${changes === 1 ? "change" : "changes"}` : ""}
       </Button>
     </div>
@@ -173,13 +190,13 @@ export function SpecEditor({ spec, projectId, onClose }: { spec: SpecDetail; pro
           <section className="box save-sum" aria-label="Change summary">
             <span className="lbl">Change summary · saved to {spec.path} as a pull request</span>
             <ol>
-              {applied.map((a, i) => (
-                <li key={i}>{a.summary}</li>
+              {summary.map((line, i) => (
+                <li key={i}>{line}</li>
               ))}
             </ol>
             <div className="btns">
-              <Button small variant="primary" onClick={submit} disabled={save.isPending}>
-                {save.isPending ? "Opening…" : "Open a pull request"}
+              <Button small variant="primary" onClick={submit} disabled={saving}>
+                {saving ? "Opening…" : "Open a pull request"}
               </Button>
               <Button small onClick={() => setConfirm(false)}>
                 Keep editing
@@ -195,7 +212,7 @@ export function SpecEditor({ spec, projectId, onClose }: { spec: SpecDetail; pro
               <a href={opened.url} target="_blank" rel="noreferrer noopener">
                 #{opened.number}
               </a>{" "}
-              on <span className="mono">{opened.branch}</span> changes {spec.path}. The spec here updates once it merges and the repo is indexed again.
+              on <span className="mono">{opened.branch}</span> {spec.draft ? "adds" : "changes"} {spec.path}. The spec here updates once it merges and the repo is indexed again.
             </span>
             <div className="btns">
               <Button small onClick={onClose}>
