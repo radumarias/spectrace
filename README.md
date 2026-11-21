@@ -20,4 +20,12 @@ just lint     # rustfmt, clippy, tsc and eslint
 just migrate  # apply new D1 migrations to the local database
 ```
 
-Worker settings are bindings and variables in `worker/wrangler.toml`. Secrets for local work go in `worker/.dev.vars` (git-ignored), for example `GITHUB_CLIENT_SECRET=...` once sign-in is ported (T0.8).
+Worker settings are bindings and variables in `worker/wrangler.toml`. Secrets for local work go in `worker/.dev.vars` (git-ignored); copy `worker/.dev.vars.example`.
+
+## Sign in with GitHub
+
+Create an OAuth app at https://github.com/settings/developers with callback URL `http://localhost:5173/api/auth/github/callback`, put its id and secret in `worker/.dev.vars` (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `PUBLIC_URL`), run `just dev`, and open http://localhost:5173/api/auth/github/login. On Cloudflare, set the same with `wrangler secret put GITHUB_CLIENT_ID`, `wrangler secret put GITHUB_CLIENT_SECRET` and `PUBLIC_URL` (secret or var) set to the deployed origin, with the OAuth app's callback URL changed to match.
+
+## Deploy
+
+`just deploy` publishes to Cloudflare. Setup and what it does: [docs/deploy.md](docs/deploy.md).
