@@ -89,7 +89,7 @@ it("creates a project with two repos (one suggested, one typed as a link) and la
   expect(create.disabled).toBe(false);
   await user.click(create);
 
-  expect(await screen.findByRole("heading", { name: "Home" })).toBeTruthy();
+  expect(await screen.findByText("Home · Mobile app")).toBeTruthy();
   expect(screen.getByText("Mobile app · 2 repos")).toBeTruthy();
   expect(server.posted).toEqual([
     {
@@ -138,7 +138,7 @@ it("lists projects as cards and opens one on its Home", async () => {
   expect(card.textContent).toContain("+1");
   expect(card.textContent).toContain("Indexing · 3 of 4 repos ready");
   await user.click(card);
-  expect(await screen.findByRole("heading", { name: "Home" })).toBeTruthy();
+  expect(await screen.findByText("Home · Shop app")).toBeTruthy();
   await waitFor(() => expect(screen.getByText("Shop app · 4 repos")).toBeTruthy());
 });
 

@@ -16,3 +16,11 @@ export function setCurrentProjectId(id: string) {
     // Private mode or blocked storage: the project just is not remembered.
   }
 }
+
+export function clearCurrentProjectId() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // Nothing to forget.
+  }
+}

@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { NewProject } from "./pages/NewProject";
 import { Page } from "./pages/Page";
+import { ProjectHome } from "./pages/ProjectHome";
+import { ProjectSettings } from "./pages/ProjectSettings";
 import { Projects } from "./pages/Projects";
 import { RequireAuth } from "./shell/RequireAuth";
 import { Shell } from "./shell/Shell";
@@ -15,7 +17,9 @@ export function App() {
           <Route index element={<Navigate to="/projects" replace />} />
           <Route path="projects" element={<Projects />} />
           <Route path="new-project" element={<NewProject />} />
-          {Object.keys(TITLES).filter((r) => r !== "projects" && r !== "new-project").map((r) => (
+          <Route path="home" element={<ProjectHome />} />
+          <Route path="project" element={<ProjectSettings />} />
+          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project"].includes(r)).map((r) => (
             <Route key={r} path={r} element={<Page route={r} />} />
           ))}
           <Route path="*" element={<Navigate to="/projects" replace />} />

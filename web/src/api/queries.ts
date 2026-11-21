@@ -1,5 +1,6 @@
 import { QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "./schema";
+import { getCurrentProjectId } from "./current";
 import { api } from "./client";
 
 export type User = components["schemas"]["User"];
@@ -51,6 +52,46 @@ export function useProjects() {
       const { data, error } = await api.GET("/api/projects");
       if (!data) throw apiError(error, "Could not load your projects.");
       return data;
+    },
+    // While any repo is still being indexed, look again every few seconds.
+    refetchInterval: (query) =>
+      query.state.data?.some((p) => p.repos.some((r) => r.index_state === "pending" || r.index_state === "indexing")) ? 5000 : false,
+  });
+}
+
+/** The project the person is working in: the remembered one, else the first. */
+export function useCurrentProject() {
+  const projects = useProjects();
+  const id = getCurrentProjectId();
+  const project = projects.data?.find((p) => p.id === id) ?? projects.data?.[0];
+  return { project, isPending: projects.isPending, error: projects.error };
+}
+
+export type ProjectChange = { name?: string; context?: string; repos?: NewProject["repos"] };
+
+export function useUpdateProject(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: ProjectChange): Promise<Project> => {
+      const { data, error } = await api.PATCH("/api/projects/{id}", { params: { path: { id } }, body });
+      if (!data) throw apiError(error, "Could not save your changes.");
+      return data;
+    },
+    onSuccess: (project) => {
+      qc.setQueryData<Project[]>(keys.projects, (old) => (old ?? []).map((p) => (p.id === project.id ? project : p)));
+    },
+  });
+}
+
+export function useDeleteProject(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { response, error } = await api.DELETE("/api/projects/{id}", { params: { path: { id } } });
+      if (!response.ok) throw apiError(error, "Could not remove the project.");
+    },
+    onSuccess: () => {
+      qc.setQueryData<Project[]>(keys.projects, (old) => (old ?? []).filter((p) => p.id !== id));
     },
   });
 }
