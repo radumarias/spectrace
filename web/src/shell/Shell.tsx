@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { getCurrentProjectId } from "../api/current";
-import { IndexLive } from "../api/live";
+import { IndexLive, ProjectLive } from "../api/live";
 import { usePulls } from "../api/pulls";
 import { useMe, useProjects, useSignOut } from "../api/queries";
 import { useTheme } from "../theme";
@@ -96,7 +96,8 @@ export function Shell() {
         </nav>
       )}
 
-      {projects?.map((p) => <IndexLive key={p.id} project={p} />)}
+      {current && <ProjectLive key={current.id} project={current} />}
+      {projects?.filter((p) => p.id !== current?.id).map((p) => <IndexLive key={p.id} project={p} />)}
 
       <main ref={main} tabIndex={-1}>
         <Outlet />

@@ -161,7 +161,7 @@ it("re-index queues the job, shows the banner, and ends in indexed from live eve
   at("/project");
   const button = (await screen.findByRole("button", { name: "Re-index repos" })) as HTMLButtonElement;
   expect(button.disabled).toBe(false);
-  expect(FakeSocket.all).toHaveLength(0); // nothing is indexing, so nothing to listen to
+  expect(FakeSocket.all).toHaveLength(1); // the current project is always listened to
   await user.click(button);
   expect(server.reindexed).toEqual(["p1"]);
   expect(await screen.findByText(/Indexing · 0 of 2 repos ready/)).toBeTruthy();
@@ -178,7 +178,8 @@ it("re-index queues the job, shows the banner, and ends in indexed from live eve
   FakeSocket.all[0]!.push("succeeded");
   expect(await screen.findByRole("button", { name: "Re-index repos" })).toBeTruthy();
   expect(screen.queryByText(/Indexing · /)).toBeNull();
-  await waitFor(() => expect(FakeSocket.all[0]!.closed).toBe(true));
+  expect(FakeSocket.all).toHaveLength(1); // one socket for the whole time, not one per need
+  expect(FakeSocket.all[0]!.closed).toBe(false);
 });
 
 it("a project that is already indexing updates its card on the Projects page", async () => {
