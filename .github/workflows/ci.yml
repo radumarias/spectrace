@@ -19,6 +19,22 @@ jobs:
   rust:
     name: Rust (fmt, clippy, test)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: spectrace
+          POSTGRES_PASSWORD: spectrace
+          POSTGRES_DB: spectrace
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U spectrace"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://spectrace:spectrace@localhost:5432/spectrace
     steps:
       - uses: actions/checkout@v4
 
