@@ -4,17 +4,22 @@
 //! The scanner works on text only (no I/O), so callers read the file and pass
 //! its path and contents.
 //!
-//! # Anchor syntax (assumed until the T4.1 spec format doc lands)
+//! # Anchor syntax
+//!
+//! Follows `docs/spec-format.md` (PR #58, proposed) where it applies.
 //!
 //! | Form | Languages | Meaning |
 //! |---|---|---|
-//! | `#[spec("id")]` | Rust | attribute at the start of a line; several ids may be listed |
-//! | `@spec("id")` | TypeScript, Python | decorator at the start of a line; several ids may be listed |
-//! | `// @spec id` or `# @spec id` | all | comment form of a spec anchor |
-//! | `// @flow id` or `# @flow id` | all | comment that marks a step of a flow |
+//! | `#[spec("id", ...)]` | Rust | attribute at the start of a line; ids are step ids (`checkout.failed`) or requirement ids (`checkout.failed/r2`); several attributes may share a line |
+//! | `// @flow step.id: note` | Rust, TypeScript | line comment (`//` or `///`) |
+//! | `# @flow step.id: note` | Python | line comment |
 //!
-//! Comment forms also accept the call form (`// @spec("id")`). Rust and
-//! TypeScript use `//` and `/* */` comments, Python uses `#`.
+//! `#[spec]` is Rust only, as in the doc. The `@flow` comment form is used for
+//! TypeScript and Python too. A `@flow` comment without a `:` note is still
+//! returned (with `note: None`) so the checker can report `A003`; one without a
+//! valid id is not an anchor. Arguments of `#[spec]` that are not valid ids are
+//! dropped here, so the checker cannot see them (`A002`); that is a gap to close
+//! when the checker is written.
 //!
 //! # Code or test
 //!
@@ -56,9 +61,9 @@ impl Language {
 /// What kind of anchor was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AnchorKind {
-    /// Ties the code or test to a spec.
+    /// `#[spec("id")]`: implements the id, or covers it when the item is a test.
     Spec,
-    /// Marks a step of a flow.
+    /// `@flow` comment: marks where a step's decision is made. Not coverage.
     Flow,
 }
 
@@ -75,27 +80,43 @@ pub struct Anchor {
     pub language: Language,
     pub kind: AnchorKind,
     pub id: String,
+    /// The note after the colon of a `@flow` comment. Always `None` for specs.
+    pub note: Option<String>,
     /// 1-based line number.
     pub line: usize,
     pub class: AnchorClass,
 }
 
-/// The one place that defines what a spec or flow id looks like: dot-separated
-/// segments, each starting with a lowercase letter and continuing with
-/// lowercase letters, digits, `_` or `-` (for example `checkout.failed`).
-pub fn is_valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.split('.').all(|seg| {
-            let mut chars = seg.chars();
-            matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
-                && chars
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-        })
+/// The one place that defines what an id looks like (spec format, "Ids"):
+/// a segment is `[a-z][a-z0-9_]*`, 1 to 40 characters.
+pub fn is_valid_segment(seg: &str) -> bool {
+    let mut chars = seg.chars();
+    (1..=40).contains(&seg.len())
+        && matches!(chars.next(), Some(c) if c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
-/// Characters that may appear in an id when it is read from a comment.
-fn is_id_char(c: char) -> bool {
-    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '-' | '.')
+/// A step id: `flow.node`, such as `checkout.failed`.
+pub fn is_valid_step_id(id: &str) -> bool {
+    matches!(id.split_once('.'), Some((flow, node)) if is_valid_segment(flow) && is_valid_segment(node))
+}
+
+/// A requirement id: a step id, `/`, and a tag `r<positive integer>`, such as
+/// `checkout.failed/r2`.
+pub fn is_valid_req_id(id: &str) -> bool {
+    let Some((step, tag)) = id.split_once('/') else {
+        return false;
+    };
+    let digits = tag.strip_prefix('r').unwrap_or("");
+    is_valid_step_id(step)
+        && !digits.is_empty()
+        && !digits.starts_with('0')
+        && digits.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Anything `#[spec(...)]` may name: a step id or a requirement id.
+pub fn is_valid_id(id: &str) -> bool {
+    is_valid_step_id(id) || is_valid_req_id(id)
 }
 
 /// True when the path alone says the file is a test file.
@@ -139,11 +160,12 @@ pub fn scan(path: &str, source: &str) -> Vec<Anchor> {
         } else {
             AnchorClass::Code
         };
-        for (kind, id) in found {
+        for (kind, id, note) in found {
             anchors.push(Anchor {
                 language,
                 kind,
                 id,
+                note,
                 line: i + 1,
                 class,
             });
@@ -252,98 +274,84 @@ fn attached_to_test(language: Language, following: &[&str]) -> bool {
     false
 }
 
-/// All anchors on one line, in order.
-fn line_anchors(language: Language, line: &str) -> Vec<(AnchorKind, String)> {
-    let mut out = Vec::new();
-    let trimmed = line.trim_start();
+type Found = (AnchorKind, String, Option<String>);
 
-    // Attribute or decorator form at the start of the line.
-    let call_marker = match language {
-        Language::Rust => "#[spec(",
-        _ => "@spec(",
-    };
-    if let Some(args) = trimmed.strip_prefix(call_marker) {
-        for id in string_args(args) {
-            out.push((AnchorKind::Spec, id));
+/// All anchors on one line, in order.
+fn line_anchors(language: Language, line: &str) -> Vec<Found> {
+    let mut out = Vec::new();
+
+    if language == Language::Rust {
+        let mut rest = line.trim_start();
+        while let Some(args) = rest.strip_prefix("#[spec(") {
+            let (ids, after) = string_args(args);
+            out.extend(ids.into_iter().map(|id| (AnchorKind::Spec, id, None)));
+            rest = after.trim_start();
+            rest = rest.strip_prefix(")]").unwrap_or(rest).trim_start();
         }
     }
 
-    // Comment forms.
     if let Some(comment) = comment_text(language, line) {
-        scan_comment(comment, &mut out);
+        if let Some(flow) = flow_anchor(comment) {
+            out.push(flow);
+        }
     }
     out
 }
 
-/// The comment part of a line, if it has one.
+/// The text of a line comment (`//`, `///` or `#` for Python), if the line has one.
 fn comment_text(language: Language, line: &str) -> Option<&str> {
     match language {
         Language::Python => line.find('#').map(|i| &line[i + 1..]),
-        _ => {
-            if let Some(i) = line.find("//") {
-                Some(&line[i + 2..])
-            } else if let Some(i) = line.find("/*") {
-                Some(&line[i + 2..])
-            } else if line.trim_start().starts_with('*') {
-                Some(line.trim_start())
-            } else {
-                None
-            }
-        }
+        _ => line
+            .find("//")
+            .map(|i| line[i + 2..].trim_start_matches(['/', '!'])),
     }
 }
 
-/// Finds `@spec` and `@flow` in comment text.
-fn scan_comment(comment: &str, out: &mut Vec<(AnchorKind, String)>) {
-    let mut rest = comment;
-    while let Some(at) = rest.find('@') {
-        let tail = &rest[at + 1..];
-        let (kind, after) = if let Some(a) = tail.strip_prefix("spec") {
-            (AnchorKind::Spec, a)
-        } else if let Some(a) = tail.strip_prefix("flow") {
-            (AnchorKind::Flow, a)
-        } else {
-            rest = tail;
-            continue;
-        };
-        rest = after;
-        if let Some(args) = after.strip_prefix('(') {
-            for id in string_args(args) {
-                out.push((kind, id));
-            }
-        } else if after.starts_with([' ', '\t']) {
-            let word: String = after
-                .trim_start()
-                .chars()
-                .take_while(|c| is_id_char(*c))
-                .collect();
-            let id = word.trim_end_matches('.');
-            if is_valid_id(id) {
-                out.push((kind, id.to_string()));
-            }
-        }
+/// Parses `@flow <step-id>[: note]` out of comment text.
+fn flow_anchor(comment: &str) -> Option<Found> {
+    let after = comment.trim_start().strip_prefix("@flow")?;
+    if !after.starts_with([' ', '\t']) {
+        return None;
     }
+    let after = after.trim_start();
+    let end = after
+        .find(|c: char| !(c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '_' | '.')))
+        .unwrap_or(after.len());
+    let (id, rest) = after.split_at(end);
+    if !is_valid_step_id(id) {
+        return None;
+    }
+    let note = rest
+        .trim_start()
+        .strip_prefix(':')
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string);
+    Some((AnchorKind::Flow, id.to_string(), note))
 }
 
-/// Reads the quoted ids of a call, from just after `(` up to `)`.
-/// Stops at the first thing that is not a string, comma or whitespace.
-fn string_args(args: &str) -> Vec<String> {
+/// Reads the quoted ids of a call, from just after `(`. Stops at the first
+/// thing that is not a string, comma or whitespace and returns the rest.
+fn string_args(args: &str) -> (Vec<String>, &str) {
     let mut ids = Vec::new();
-    let mut chars = args.chars().peekable();
-    while let Some(&c) = chars.peek() {
-        if c == '"' || c == '\'' {
-            chars.next();
-            let s: String = chars.by_ref().take_while(|&x| x != c).collect();
-            if is_valid_id(&s) {
-                ids.push(s);
-            }
-        } else if c == ',' || c.is_whitespace() {
-            chars.next();
-        } else {
+    let mut rest = args;
+    loop {
+        rest = rest.trim_start_matches(|c: char| c == ',' || c.is_whitespace());
+        let Some(quote) = rest.chars().next().filter(|c| *c == '"') else {
             break;
+        };
+        let body = &rest[quote.len_utf8()..];
+        let Some(close) = body.find(quote) else {
+            rest = "";
+            break;
+        };
+        if is_valid_id(&body[..close]) {
+            ids.push(body[..close].to_string());
         }
+        rest = &body[close + 1..];
     }
-    ids
+    (ids, rest)
 }
 
 #[cfg(test)]
@@ -352,14 +360,22 @@ mod tests {
 
     #[test]
     fn ids() {
-        assert!(is_valid_id("checkout.failed"));
-        assert!(is_valid_id("cart"));
-        assert!(is_valid_id("pay.card-declined_2"));
+        assert!(is_valid_step_id("checkout.failed"));
+        assert!(is_valid_step_id("pay.card_declined_2"));
+        assert!(!is_valid_step_id("checkout"));
+        assert!(!is_valid_step_id("checkout.failed.x"));
+        assert!(!is_valid_step_id("Checkout.failed"));
+        assert!(!is_valid_step_id("checkout.card-declined"));
+        assert!(!is_valid_step_id("checkout..failed"));
+        assert!(!is_valid_step_id("1cart.add"));
+        assert!(!is_valid_step_id(&format!("a.{}", "b".repeat(41))));
+        assert!(is_valid_req_id("checkout.failed/r2"));
+        assert!(is_valid_req_id("checkout.failed/r10"));
+        assert!(!is_valid_req_id("checkout.failed/r0"));
+        assert!(!is_valid_req_id("checkout.failed/r"));
+        assert!(!is_valid_req_id("checkout.failed/2"));
+        assert!(is_valid_id("checkout.failed") && is_valid_id("checkout.failed/r1"));
         assert!(!is_valid_id(""));
-        assert!(!is_valid_id("Checkout.failed"));
-        assert!(!is_valid_id("checkout..failed"));
-        assert!(!is_valid_id("checkout."));
-        assert!(!is_valid_id("1cart"));
     }
 
     #[test]
@@ -386,13 +402,37 @@ mod tests {
 
     #[test]
     fn unknown_files_give_nothing() {
-        assert!(scan("README.md", "// @spec checkout.failed").is_empty());
+        assert!(scan("README.md", "// @flow checkout.failed: x").is_empty());
     }
 
     #[test]
     fn invalid_ids_are_ignored() {
         assert!(scan("a.rs", "#[spec(\"Not An Id\")]\nfn f() {}\n").is_empty());
-        assert!(scan("a.py", "# @spec Bad.Id\n").is_empty());
+        assert!(scan("a.py", "# @flow Bad.Id: x\n").is_empty());
+        assert!(scan("a.py", "# @flow checkout\n").is_empty());
+    }
+
+    #[test]
+    fn spec_is_rust_only() {
+        assert!(scan("a.ts", "@spec(\"cart.add\")\n// #[spec(\"cart.add\")]\n").is_empty());
+        assert!(scan("a.py", "#[spec(\"cart.add\")]\n").is_empty());
+    }
+
+    #[test]
+    fn flow_note_is_optional() {
+        let got = scan("a.py", "# @flow cart.add: cap at 99\n# @flow cart.remove\n");
+        assert_eq!(got[0].note.as_deref(), Some("cap at 99"));
+        assert_eq!(got[1].note, None);
+    }
+
+    #[test]
+    fn several_attributes_on_one_line() {
+        let got = scan(
+            "a.rs",
+            "#[spec(\"cart.add\")] #[spec(\"cart.remove/r1\")] fn f() {}\n",
+        );
+        let ids: Vec<&str> = got.iter().map(|a| a.id.as_str()).collect();
+        assert_eq!(ids, ["cart.add", "cart.remove/r1"]);
     }
 
     #[test]

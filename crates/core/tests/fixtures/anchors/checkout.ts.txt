@@ -1,24 +1,23 @@
-// @flow checkout.pay
+// @flow checkout.pay: charge first
 export function pay(cart: Cart): Receipt {
-  // @spec checkout.paid
+  // @flow checkout.paid: receipt is created here
   return charge(cart);
 }
 
-@spec("checkout.failed")
+// @spec cart.not_an_anchor_in_ts
+@spec("cart.also_not")
 export class Failure {}
 
-/**
- * @spec checkout.refunded.
- */
+// @flow checkout.refunded
 export function refund() {}
 
-// @spec checkout.paid
+// @flow checkout.paid: covered by the pay suite
 describe("pay", () => {
-  // @spec checkout.failed
+  // @flow checkout.failed: declined path
   it("fails", () => {});
 });
 
-// @spec cart.add
+// @flow cart.add: note
 test("adds", () => {});
 
 const url = "http://example.com/@flow-not-an-anchor";

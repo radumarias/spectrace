@@ -47,10 +47,10 @@ fn rust_anchors() {
             (5, Spec, "checkout.paid", Code),
             (7, Flow, "checkout.failed", Code),
             (11, Spec, "checkout.failed", Code),
-            (11, Spec, "checkout.refunded", Code),
+            (11, Spec, "checkout.refunded/r2", Code),
             (21, Spec, "checkout.paid", Test),
-            (25, Spec, "checkout.failed", Test),
-            (29, Spec, "cart.add", Test),
+            (25, Flow, "checkout.failed", Test),
+            (29, Spec, "cart.add/r1", Test),
             (33, Spec, "cart.remove", Code),
         ],
     );
@@ -63,12 +63,11 @@ fn typescript_anchors() {
         TYPESCRIPT,
         &[
             (1, Flow, "checkout.pay", Code),
-            (3, Spec, "checkout.paid", Code),
-            (7, Spec, "checkout.failed", Code),
-            (11, Spec, "checkout.refunded", Code),
-            (15, Spec, "checkout.paid", Test),
-            (17, Spec, "checkout.failed", Test),
-            (21, Spec, "cart.add", Test),
+            (3, Flow, "checkout.paid", Code),
+            (11, Flow, "checkout.refunded", Code),
+            (14, Flow, "checkout.paid", Test),
+            (16, Flow, "checkout.failed", Test),
+            (20, Flow, "cart.add", Test),
         ],
     );
 }
@@ -80,16 +79,26 @@ fn python_anchors() {
         PYTHON,
         &[
             (1, Flow, "checkout.pay", Code),
-            (3, Spec, "checkout.paid", Code),
-            (7, Spec, "checkout.failed", Code),
-            (12, Spec, "checkout.refunded", Code),
-            (12, Spec, "cart.remove", Code),
-            (17, Spec, "checkout.paid", Test),
+            (3, Flow, "checkout.paid", Code),
+            (12, Flow, "checkout.refunded", Code),
+            (17, Flow, "checkout.paid", Test),
             (23, Flow, "checkout.failed", Test),
-            (28, Spec, "cart.add", Test),
-            (34, Spec, "cart.after", Code),
+            (28, Flow, "cart.add", Test),
+            (34, Flow, "cart.after", Code),
         ],
     );
+}
+
+#[test]
+fn flow_notes_are_kept() {
+    let notes: Vec<_> = scan("a.rs", RUST).into_iter().map(|a| a.note).collect();
+    assert_eq!(
+        notes[0].as_deref(),
+        Some("charge first, create the order after")
+    );
+    assert_eq!(notes[1], None);
+    let ts = scan("a.ts", TYPESCRIPT);
+    assert_eq!(ts[2].note, None); // `@flow checkout.refunded` has no note
 }
 
 #[test]

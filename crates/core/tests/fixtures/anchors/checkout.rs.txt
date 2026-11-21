@@ -1,14 +1,14 @@
 //! Checkout payment handling.
 
-// @flow checkout.pay
+// @flow checkout.pay: charge first, create the order after
 /// Charges the card.
 #[spec("checkout.paid")]
 pub fn pay(cart: &Cart) -> Result<Receipt, PayError> {
-    // @flow checkout.failed
+    /// @flow checkout.failed: cap retries, then cancel
     charge(cart)
 }
 
-#[spec("checkout.failed", "checkout.refunded")]
+#[spec("checkout.failed", "checkout.refunded/r2")]
 pub fn fail(cart: &Cart) {}
 
 // #[spec("checkout.ignored")]
@@ -22,13 +22,13 @@ mod tests {
     #[test]
     fn pays() {}
 
-    // @spec checkout.failed
+    // @flow checkout.failed: the declined path
     fn helper_in_test_module() {}
 }
 
-#[spec("cart.add")]
+#[spec("cart.add/r1")]
 #[tokio::test]
 async fn adds_to_cart() {}
 
-/* @spec cart.remove */
+#[spec("cart.remove")] #[inline]
 fn remove() {}
