@@ -26,6 +26,17 @@ Worker settings are bindings and variables in `worker/wrangler.toml`. Secrets fo
 
 Create an OAuth app at https://github.com/settings/developers with callback URL `http://localhost:5173/api/auth/github/callback`, put its id and secret in `worker/.dev.vars` (`GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `PUBLIC_URL`), run `just dev`, and open http://localhost:5173/api/auth/github/login. On Cloudflare, set the same with `wrangler secret put GITHUB_CLIENT_ID`, `wrangler secret put GITHUB_CLIENT_SECRET` and `PUBLIC_URL` (secret or var) set to the deployed origin, with the OAuth app's callback URL changed to match.
 
+## GitHub App (repo list)
+
+Create a GitHub App at https://github.com/settings/apps/new:
+
+- Callback URL `http://localhost:5173/api/auth/github/callback`; tick **Request user authorization (OAuth) during installation**.
+- Setup URL `http://localhost:5173/api/github/install/callback`; tick **Redirect on update**.
+- Repository permissions: Contents read, Pull requests read and write, Metadata read. Webhooks can stay off for now.
+- After creating it, generate a **private key** (downloads a `.pem`) and note the **App ID** and the URL **slug**.
+
+Use the App's own **Client ID** and a generated **client secret** as `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`, so sign-in and install share one app. Then add to `worker/.dev.vars`: `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, and `GITHUB_APP_PRIVATE_KEY` (the PEM, with `\n` for line breaks if on one line). Sign in, open http://localhost:5173/api/github/install, install it on your account, and `GET /api/github/repos` lists the repositories. On Cloudflare set the same three with `wrangler secret put`, and change the App's two URLs to the deployed origin.
+
 ## Deploy
 
 `just deploy` publishes to Cloudflare. Setup and what it does: [docs/deploy.md](docs/deploy.md).

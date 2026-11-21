@@ -9,6 +9,10 @@ export interface Bindings {
   GITHUB_CLIENT_SECRET?: string;
   /** Where browsers reach the app, no trailing slash. The OAuth callback is `<PUBLIC_URL>/api/auth/github/callback`. */
   PUBLIC_URL?: string;
+  /** GitHub App (T1.2). Secrets: the numeric App ID, the app's URL slug, and its PEM private key (PKCS#1 or PKCS#8). Repo routes answer 500 until all three are set. */
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_SLUG?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
   /** Overrides for tests: default `https://github.com` and `https://api.github.com`. */
   GITHUB_OAUTH_URL?: string;
   GITHUB_API_URL?: string;

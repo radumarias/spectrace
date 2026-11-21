@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { TEST_APP_PRIVATE_KEY } from "./test/app-key";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 
 export default defineConfig(async () => {
@@ -18,6 +19,9 @@ export default defineConfig(async () => {
             PUBLIC_URL: "http://localhost:5173",
             GITHUB_OAUTH_URL: "http://github.test",
             GITHUB_API_URL: "http://api.github.test",
+            GITHUB_APP_ID: "12345",
+            GITHUB_APP_SLUG: "spectrace-test",
+            GITHUB_APP_PRIVATE_KEY: TEST_APP_PRIVATE_KEY,
           },
         },
       }),
