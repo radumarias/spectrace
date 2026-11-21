@@ -19,7 +19,7 @@ const PULL = {
 // Opens a pull request and reads its description and files, with no horizontal scroll and no console errors.
 // The inbox that links here is T2.4; this opens the same /pr/<id> address its rows use.
 test("a pull request shows its header, description and files", async ({ page }) => {
-  await mockApi(page, { "/api/me": USER, "/api/projects": [PROJECT], "/api/projects/p1/pulls": { pulls: [PULL], counts: { needs: 1, open: 1, merged: 0 } }, "/api/projects/p1/pulls/pr-1": PULL, "/api/projects/p1/pulls/pr-1/reviews": { reviews: [] } });
+  await mockApi(page, { "/api/me": USER, "/api/projects": [PROJECT], "/api/projects/p1/pulls": { pulls: [PULL], counts: { needs: 1, open: 1, merged: 0 } }, "/api/projects/p1/pulls/pr-1": PULL, "/api/projects/p1/pulls/pr-1/reviews": { reviews: [] }, "/api/projects/p1/pulls/pr-1/diff": { files: [{ path: "src/checkout/Declined.tsx", patch: "@@ -10,3 +10,4 @@ export function Declined() {\n   const reason = useReason();\n-  return <p>Declined</p>;\n+  return <p>Declined: {reason} and a very long line that must scroll inside the diff and never widen the page at 390 px wide</p>;\n }" }] } });
   await page.addInitScript(() => localStorage.setItem("spectrace-proj", "p1"));
   const errors = trackErrors(page);
 
@@ -31,8 +31,11 @@ test("a pull request shows its header, description and files", async ({ page }) 
   await expectNoHorizontalScroll(page);
 
   await page.getByRole("tab", { name: "Files · 2" }).click();
-  await expect(page.getByRole("cell", { name: "src/checkout/Declined.tsx" })).toBeVisible();
+  await expect(page.getByText("src/checkout/Declined.tsx")).toBeVisible();
   await expect(page.getByText("+31")).toBeVisible();
+  await page.getByRole("button", { name: /Declined\.tsx\b(?!.*test)/ }).click();
+  await expect(page.getByRole("table", { name: "Changes" })).toBeVisible();
+  await expect(page.getByText("return <p>Declined</p>;")).toBeVisible();
   await expectNoHorizontalScroll(page);
   expect(errors).toEqual([]);
 });

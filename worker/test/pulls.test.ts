@@ -195,6 +195,22 @@ describe("GET /api/projects/{id}/pulls/{pullId}", () => {
     });
   });
 
+  it("serves the diff of each file apart from the pull request", async () => {
+    const s = await seed();
+    const id = `pr-${s.shop}-1`;
+    await env.DB.prepare("INSERT INTO pr_files (pull_request_id, path, status, additions, deletions, patch) VALUES (?1, 'b.ts', 'modified', 1, 1, '@@ -1 +1 @@\n-a\n+b'), (?1, 'a.png', 'added', 0, 0, NULL)")
+      .bind(id)
+      .run();
+    const res = await call(`/api/projects/${s.projectId}/pulls/${id}/diff`, s.cookie);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ files: [{ path: "a.png", patch: null }, { path: "b.ts", patch: "@@ -1 +1 @@\n-a\n+b" }] });
+    const detail = (await (await call(`/api/projects/${s.projectId}/pulls/${id}`, s.cookie)).json()) as { files: object[] };
+    expect(JSON.stringify(detail.files)).not.toContain("patch");
+    const t = await seed();
+    expect((await call(`/api/projects/${s.projectId}/pulls/pr-${t.shop}-1/diff`, s.cookie)).status).toBe(404);
+    expect((await call(`/api/projects/${s.projectId}/pulls/${id}/diff`, null)).status).toBe(401);
+  });
+
   it("lists the check runs of the head commit, failures first, with one run per name", async () => {
     const s = await seed();
     const id = `pr-${s.shop}-1`;

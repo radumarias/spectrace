@@ -379,6 +379,34 @@
         ],
         "description": "Size of each inbox tab, over every repo of the project."
       },
+      "PullDiff": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "patch": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "GitHub's unified diff; null for binary files and diffs that are too large."
+                }
+              },
+              "required": [
+                "path",
+                "patch"
+              ]
+            }
+          }
+        },
+        "required": [
+          "files"
+        ]
+      },
       "PullDetail": {
         "allOf": [
           {
@@ -1850,6 +1878,64 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/pulls/{pullId}/diff": {
+      "get": {
+        "summary": "The unified diff of each changed file",
+        "description": "Kept apart from the pull request so the page loads without it. Files are in the same order as `files` on the pull request.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "pullId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diffs by file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullDiff"
                 }
               }
             }

@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
-import { useMergePull, usePull, usePullReviews, useReviewPull, type PullDetail as Pull } from "../api/pulls";
+import { useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, type PullDetail as Pull } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
+import { Diff } from "../ui/Diff";
 import { Markdown, stripHtmlComments } from "../ui/Markdown";
 import { useToast } from "../ui/Toast";
 
@@ -83,7 +84,7 @@ export function PullDetail() {
         onChange={setTab}
       />
 
-      {tab === "walk" ? <Walkthrough pull={p} /> : <Files pull={p} />}
+      {tab === "walk" ? <Walkthrough pull={p} /> : <Files projectId={project.id} pull={p} />}
     </div>
   );
 }
@@ -129,29 +130,53 @@ function Walkthrough({ pull: p }: { pull: Pull }) {
   );
 }
 
-function Files({ pull: p }: { pull: Pull }) {
+function Files({ projectId, pull: p }: { projectId: string; pull: Pull }) {
+  const diffs = usePullDiff(projectId, p.id, true);
+  const [open, setOpen] = useState<Set<string>>(new Set());
   if (p.files.length === 0) return <Card><p className="sub">No changed files are stored for this pull request yet.</p></Card>;
+  const toggle = (path: string) =>
+    setOpen((o) => {
+      const next = new Set(o);
+      if (!next.delete(path)) next.add(path);
+      return next;
+    });
   return (
-    <div className="card tbl-wrap">
-      <table className="tbl" style={{ minWidth: 420 }}>
-        <thead>
-          <tr><th>File</th><th>Status</th><th className="num">Change</th></tr>
-        </thead>
-        <tbody>
-          {p.files.map((f) => (
-            <tr key={f.path}>
-              <td>
-                <code style={{ overflowWrap: "anywhere" }}>{f.path}</code>
-                {f.previousPath && <div className="mono sub" style={{ fontSize: 11 }}>from {f.previousPath}</div>}
-              </td>
-              <td><Pill tone={f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "idle"}>{f.status}</Pill></td>
-              <td className="num mono" style={{ fontSize: 12 }}>
+    <div className="stack">
+      {diffs.error && <p className="err" role="alert">{diffs.error.message}</p>}
+      {p.files.map((f) => {
+        const expanded = open.has(f.path);
+        const patch = diffs.data?.get(f.path);
+        const id = `diff-${f.path}`;
+        return (
+          <div className="card file" key={f.path}>
+            <button className="file-head" type="button" aria-expanded={expanded} aria-controls={id} onClick={() => toggle(f.path)}>
+              <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+              <span className="file-name">
+                <code>{f.path}</code>
+                {f.previousPath && <span className="mono sub" style={{ fontSize: 11 }}>from {f.previousPath}</span>}
+              </span>
+              <Pill tone={f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "idle"}>{f.status}</Pill>
+              <span className="mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
                 <span style={{ color: "var(--ok)" }}>+{f.additions}</span> <span style={{ color: "var(--bad)" }}>−{f.deletions}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              </span>
+            </button>
+            {expanded && (
+              <div id={id} className="file-body">
+                {diffs.isPending ? (
+                  <p className="sub pad">Loading the changes…</p>
+                ) : patch ? (
+                  <Diff patch={patch} />
+                ) : (
+                  <p className="sub pad">
+                    No diff to show here: the file is binary, empty, or too large.{" "}
+                    <a href={`${p.htmlUrl}/files`} target="_blank" rel="noreferrer">View it on GitHub</a>
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

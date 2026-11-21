@@ -22,6 +22,13 @@ const PULL = {
   ],
 };
 
+const DIFF = {
+  files: [
+    { path: "src/checkout/Declined.tsx", patch: "@@ -10,3 +10,4 @@ export function Declined() {\n   const reason = useReason();\n-  return <p>Declined</p>;\n+  return <p>Declined: {reason}</p>;\n+  // shown inline\n }" },
+    { path: "src/checkout/Declined.test.tsx", patch: null },
+  ],
+};
+
 /** A fake server that remembers reviews and merges, so the page sees its own writes. */
 function server(pull: Record<string, unknown>, status = 200, refuseMerge = false) {
   const state = { ...pull };
@@ -35,6 +42,7 @@ function server(pull: Record<string, unknown>, status = 200, refuseMerge = false
       if (path === "/api/me") return Response.json(USER);
       if (path === "/api/projects") return Response.json([PROJECT]);
       if (path === "/api/projects/p1/pulls/pr-1") return Response.json(state, { status });
+      if (path === "/api/projects/p1/pulls/pr-1/diff") return Response.json(DIFF);
       if (path === "/api/projects/p1/pulls/pr-1/reviews" && req.method === "GET") return Response.json({ reviews });
       if (path === "/api/projects/p1/pulls/pr-1/reviews") {
         const body = (await req.json()) as { verdict: string; body?: string };
@@ -78,10 +86,34 @@ it("shows the header, the description, and the files", async () => {
   expect(screen.getByText(PULL.body)).toBeTruthy();
 
   await user.click(screen.getByRole("tab", { name: "Files · 2" }));
-  const table = screen.getByRole("table");
-  expect(within(table).getByText("src/checkout/Declined.tsx")).toBeTruthy();
-  expect(within(table).getByText("+31")).toBeTruthy();
-  expect(within(table).getByText("added")).toBeTruthy();
+  expect(screen.getByText("src/checkout/Declined.tsx")).toBeTruthy();
+  expect(screen.getByText("+31")).toBeTruthy();
+  expect(screen.getByText("added")).toBeTruthy();
+});
+
+it("opens a file to show its diff with line numbers, and says when there is none", async () => {
+  server(PULL);
+  const user = userEvent.setup();
+  at("/pr/pr-1");
+  await user.click(await screen.findByRole("tab", { name: "Files · 2" }));
+  const changed = screen.getByRole("button", { name: /Declined\.tsx\b(?!.*test)/ });
+  expect(changed.getAttribute("aria-expanded")).toBe("false");
+  await user.click(changed);
+  const diff = await screen.findByRole("table", { name: "Changes" });
+  const rows = within(diff).getAllByRole("row");
+  expect(rows).toHaveLength(6);
+  expect(rows[0]!.className).toContain("dl-hunk");
+  expect(rows[2]!.className).toContain("dl-del");
+  expect(rows[2]!.textContent).toContain("  return <p>Declined</p>;".trim());
+  expect(rows[2]!.querySelectorAll(".dn")[0]!.textContent).toBe("11");
+  expect(rows[3]!.className).toContain("dl-add");
+  expect(rows[3]!.querySelectorAll(".dn")[1]!.textContent).toBe("11");
+  await user.click(changed);
+  expect(screen.queryByRole("table", { name: "Changes" })).toBeNull();
+
+  await user.click(screen.getByRole("button", { name: /Declined\.test\.tsx/ }));
+  expect(await screen.findByText(/No diff to show here/)).toBeTruthy();
+  expect(screen.getByRole("link", { name: "View it on GitHub" }).getAttribute("href")).toBe(`${PULL.htmlUrl}/files`);
 });
 
 it("says so when the pull request is not in the project", async () => {
