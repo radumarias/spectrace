@@ -1,10 +1,12 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import type { AppEnv } from "../env";
+import type { Context } from "hono";
+import type { AppEnv, Bindings } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
+import { appConfigFromEnv, ghHeaders, installationToken } from "../github-app";
 import { enqueueJob, type JobRow } from "../jobs/queue";
-import { SYNC_KIND } from "../jobs/sync";
+import { installationFor, SYNC_KIND } from "../jobs/sync";
 import { Job, toJob } from "./jobs";
 import { requireProjectOwner } from "./projects";
 
@@ -57,12 +59,15 @@ const errors = {
 };
 
 // One SQL expression per tab, so the list and the counts can never disagree.
-// "Needs you" is every open, non-draft PR for now; T2.6 adds approvals and will
-// leave out the ones you already approved.
-const NEEDS = "(p.state = 'open' AND p.draft = 0)";
+// "Needs you" is every open, non-draft PR except the ones your latest review
+// approved at the current head commit (a push brings them back). `?N` is the
+// signed-in user's id; each query binds it at its own position.
+const needs = (user: number) =>
+  `(p.state = 'open' AND p.draft = 0 AND COALESCE((SELECT v.verdict FROM pull_reviews v
+      WHERE v.pull_request_id = p.id AND v.user_id = ?${user} AND v.head_sha = p.head_sha ORDER BY v.id DESC LIMIT 1), '') <> 'approved')`;
 const OPEN = "p.state = 'open'";
 const MERGED = "p.merged_at IS NOT NULL";
-const WHERE = { needs: NEEDS, open: OPEN, merged: MERGED, all: "1" } as const;
+const where = (filter: "needs" | "open" | "merged" | "all", user: number) => ({ needs: needs(user), open: OPEN, merged: MERGED, all: "1" })[filter];
 
 interface PullRow {
   id: string;
@@ -87,7 +92,7 @@ interface PullRow {
   needs: number;
 }
 
-const SELECT = `SELECT p.*, r.full_name AS repo, ${NEEDS} AS needs
+const select = (user: number) => `SELECT p.*, r.full_name AS repo, ${needs(user)} AS needs
   FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id`;
 
 function toPull(r: PullRow): z.infer<typeof Pull> {
@@ -165,6 +170,177 @@ const pull = createRoute({
   },
 });
 
+const Review = z
+  .object({
+    id: z.number().int(),
+    verdict: z.enum(["approved", "changes_requested"]),
+    body: z.string(),
+    headSha: z.string().openapi({ description: "The commit the review was left on." }),
+    githubReviewId: z.number().int().nullable(),
+    createdAt: z.string(),
+  })
+  .openapi("PullReview");
+
+const conflict = { description: "Not open, a draft, or GitHub refused (not mergeable, or the head moved)", content: { "application/json": { schema: ErrorBody } } };
+const upstream = { description: "GitHub could not be reached or refused the call", content: { "application/json": { schema: ErrorBody } } };
+
+const reviews = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/pulls/{pullId}/reviews",
+  summary: "The reviews you left on a pull request from spectrace, newest first",
+  request: { params: z.object({ projectId: ProjectParam, pullId: PullParam }) },
+  responses: { 200: { description: "Your reviews", content: { "application/json": { schema: z.object({ reviews: z.array(Review) }) } } }, 401: errors[401], 404: errors[404] },
+});
+
+const review = createRoute({
+  method: "post",
+  path: "/api/projects/{projectId}/pulls/{pullId}/reviews",
+  summary: "Approve a pull request or request changes (owner only)",
+  description:
+    "Leaves a review on GitHub as the App, on the PR's current head commit, and records it. " +
+    "An approval takes the PR out of `needs` until its head moves. `request_changes` needs a `body`.",
+  request: {
+    params: z.object({ projectId: ProjectParam, pullId: PullParam }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: z.object({ verdict: z.enum(["approve", "request_changes"]), body: z.string().max(65_000).optional() }) } },
+    },
+  },
+  responses: {
+    201: { description: "The recorded review", content: { "application/json": { schema: Review } } },
+    400: errors[400],
+    401: errors[401],
+    404: errors[404],
+    409: conflict,
+    502: upstream,
+  },
+});
+
+const merge = createRoute({
+  method: "post",
+  path: "/api/projects/{projectId}/pulls/{pullId}/merge",
+  summary: "Merge a pull request on GitHub (owner only)",
+  description:
+    "Merges the PR at the head commit spectrace last saw (`squash` unless `method` says otherwise). " +
+    "GitHub refuses when the PR is not mergeable or its head has moved; that comes back as 409 and a sync will refresh it.",
+  request: {
+    params: z.object({ projectId: ProjectParam, pullId: PullParam }),
+    body: { required: false, content: { "application/json": { schema: z.object({ method: z.enum(["merge", "squash", "rebase"]).default("squash") }) } } },
+  },
+  responses: {
+    200: { description: "The merged pull request", content: { "application/json": { schema: Pull } } },
+    400: errors[400],
+    401: errors[401],
+    404: errors[404],
+    409: conflict,
+    502: upstream,
+  },
+});
+
+/** What a write needs to know about a stored PR, checked to belong to a project the user owns. */
+async function writablePull(c: Context<AppEnv>, projectId: string, pullId: string) {
+  const user = await requireUser(c);
+  await requireProjectOwner(c.env.DB, user.id, projectId);
+  const row = await c.env.DB.prepare(
+    `SELECT p.id, p.number, p.state, p.draft, p.head_sha, p.merged_at, r.full_name FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id
+      WHERE r.project_id = ?1 AND p.id = ?2`,
+  )
+    .bind(projectId, pullId)
+    .first<{ id: string; number: number; state: string; draft: number; head_sha: string; merged_at: string | null; full_name: string }>();
+  if (!row) throw AppError.notFound(`pull request ${pullId}`);
+  if (row.state !== "open" || row.merged_at) throw new AppError("conflict", "conflict: the pull request is not open");
+  return { user, pr: row };
+}
+
+/** A call to GitHub as the App installed on the repo's owner. Returns the status and body; 5xx and network errors throw. */
+async function github(env: Bindings, projectId: string, fullName: string, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+  const installationId = await installationFor(env, projectId, fullName);
+  if (installationId === null) throw new AppError("conflict", `conflict: no GitHub App installation for ${fullName}; install the app on its owner first`);
+  const app = appConfigFromEnv(env);
+  const token = await installationToken(app, installationId);
+  if (token === null) throw new AppError("conflict", `conflict: GitHub no longer knows the installation for ${fullName}`);
+  let res: Response;
+  try {
+    res = await fetch(`${app.apiUrl}${path}`, { method, headers: { ...ghHeaders(token), "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch (cause) {
+    throw new AppError("upstream", `GitHub ${method} ${path}: ${String(cause)}`, { cause });
+  }
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (res.status >= 500 || res.status === 401 || res.status === 403 || res.status === 429) {
+    throw new AppError("upstream", `GitHub ${method} ${path}: status ${res.status} ${String(json.message ?? "")}`);
+  }
+  return { status: res.status, json };
+}
+
+const message = (json: Record<string, unknown>) => (typeof json.message === "string" ? json.message : "GitHub refused");
+
+interface ReviewRow {
+  id: number;
+  verdict: "approved" | "changes_requested";
+  body: string;
+  head_sha: string;
+  github_review_id: number | null;
+  created_at: string;
+}
+
+const toReview = (r: ReviewRow): z.infer<typeof Review> => ({ id: r.id, verdict: r.verdict, body: r.body, headSha: r.head_sha, githubReviewId: r.github_review_id, createdAt: r.created_at });
+
+export function registerPullActions(app: OpenAPIHono<AppEnv>) {
+  app.openapi(reviews, async (c) => {
+    const { projectId, pullId } = c.req.valid("param");
+    const user = await requireUser(c);
+    await requireProjectOwner(c.env.DB, user.id, projectId);
+    const found = await c.env.DB.prepare("SELECT p.id FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id WHERE r.project_id = ?1 AND p.id = ?2").bind(projectId, pullId).first();
+    if (!found) throw AppError.notFound(`pull request ${pullId}`);
+    const { results } = await c.env.DB.prepare("SELECT id, verdict, body, head_sha, github_review_id, created_at FROM pull_reviews WHERE pull_request_id = ?1 AND user_id = ?2 ORDER BY id DESC")
+      .bind(pullId, user.id)
+      .all<ReviewRow>();
+    return c.json({ reviews: results.map(toReview) }, 200);
+  });
+
+  app.openapi(review, async (c) => {
+    const { projectId, pullId } = c.req.valid("param");
+    const { verdict, body } = c.req.valid("json");
+    const text = (body ?? "").trim();
+    if (verdict === "request_changes" && text === "") throw AppError.badRequest("requesting changes needs a comment");
+    const { user, pr } = await writablePull(c, projectId, pullId);
+    const res = await github(c.env, projectId, pr.full_name, "POST", `/repos/${pr.full_name}/pulls/${pr.number}/reviews`, {
+      commit_id: pr.head_sha,
+      event: verdict === "approve" ? "APPROVE" : "REQUEST_CHANGES",
+      ...(text ? { body: text } : {}),
+    });
+    if (res.status !== 200 && res.status !== 201) throw new AppError("conflict", `conflict: ${message(res.json)}`);
+    const row = await c.env.DB.prepare(
+      `INSERT INTO pull_reviews (pull_request_id, user_id, verdict, body, head_sha, github_review_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       RETURNING id, verdict, body, head_sha, github_review_id, created_at`,
+    )
+      .bind(pullId, user.id, verdict === "approve" ? "approved" : "changes_requested", text, pr.head_sha, typeof res.json.id === "number" ? res.json.id : null)
+      .first<ReviewRow>();
+    if (!row) throw new AppError("internal", "pull_reviews insert returned no row");
+    return c.json(toReview(row), 201);
+  });
+
+  app.openapi(merge, async (c) => {
+    const { projectId, pullId } = c.req.valid("param");
+    const method = (c.req.valid("json") ?? {}).method ?? "squash";
+    const { user, pr } = await writablePull(c, projectId, pullId);
+    if (pr.draft === 1) throw new AppError("conflict", "conflict: a draft pull request cannot be merged");
+    const res = await github(c.env, projectId, pr.full_name, "PUT", `/repos/${pr.full_name}/pulls/${pr.number}/merge`, { merge_method: method, sha: pr.head_sha });
+    // 404: gone; 405: not mergeable (checks, conflicts, protection); 409: head moved; 422: method not allowed.
+    if (res.status !== 200) throw new AppError(res.status === 404 ? "not_found" : "conflict", `${res.status === 404 ? "not found" : "conflict"}: ${message(res.json)}`);
+    // The `pull_request` webhook will say the same; storing it now keeps the answer and the inbox right at once.
+    await c.env.DB.prepare(
+      `UPDATE pull_requests SET state = 'closed', merged_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), github_updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+         synced_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1`,
+    )
+      .bind(pullId)
+      .run();
+    const row = await c.env.DB.prepare(`${select(2)} WHERE p.id = ?1`).bind(pullId, user.id).first<PullRow>();
+    if (!row) throw AppError.notFound(`pull request ${pullId}`);
+    return c.json(toPull(row), 200);
+  });
+}
+
 export function registerPulls(app: OpenAPIHono<AppEnv>) {
   // Registered before `get` so "sync" is never read as a pull id.
   app.openapi(pull, async (c) => {
@@ -191,24 +367,26 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
   app.openapi(list, async (c) => {
     const { projectId } = c.req.valid("param");
     const { filter, repo, limit } = c.req.valid("query");
-    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
+    const user = await requireUser(c);
+    await requireProjectOwner(c.env.DB, user.id, projectId);
     const [rows, counts] = await c.env.DB.batch([
       c.env.DB.prepare(
-        `${SELECT} WHERE r.project_id = ?1 AND (?2 IS NULL OR r.full_name = ?2 COLLATE NOCASE) AND ${WHERE[filter]}
+        `${select(4)} WHERE r.project_id = ?1 AND (?2 IS NULL OR r.full_name = ?2 COLLATE NOCASE) AND ${where(filter, 4)}
          ORDER BY needs DESC, p.github_updated_at DESC, p.id LIMIT ?3`,
-      ).bind(projectId, repo ?? null, limit),
+      ).bind(projectId, repo ?? null, limit, user.id),
       c.env.DB.prepare(
-        `SELECT COALESCE(SUM(${NEEDS}), 0) AS needs, COALESCE(SUM(${OPEN}), 0) AS open, COALESCE(SUM(${MERGED}), 0) AS merged
+        `SELECT COALESCE(SUM(${needs(2)}), 0) AS needs, COALESCE(SUM(${OPEN}), 0) AS open, COALESCE(SUM(${MERGED}), 0) AS merged
            FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id WHERE r.project_id = ?1`,
-      ).bind(projectId),
+      ).bind(projectId, user.id),
     ]);
     return c.json({ pulls: (rows!.results as unknown as PullRow[]).map(toPull), counts: counts!.results[0] as z.infer<typeof Counts> }, 200);
   });
 
   app.openapi(get, async (c) => {
     const { projectId, pullId } = c.req.valid("param");
-    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
-    const row = await c.env.DB.prepare(`${SELECT} WHERE r.project_id = ?1 AND p.id = ?2`).bind(projectId, pullId).first<PullRow>();
+    const user = await requireUser(c);
+    await requireProjectOwner(c.env.DB, user.id, projectId);
+    const row = await c.env.DB.prepare(`${select(3)} WHERE r.project_id = ?1 AND p.id = ?2`).bind(projectId, pullId, user.id).first<PullRow>();
     if (!row) throw AppError.notFound(`pull request ${pullId}`);
     const { results } = await c.env.DB.prepare("SELECT path, status, previous_path, additions, deletions FROM pr_files WHERE pull_request_id = ?1 ORDER BY path")
       .bind(pullId)
