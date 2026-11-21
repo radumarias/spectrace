@@ -36,7 +36,7 @@ const loginRoute = createRoute({
   method: "get",
   path: "/api/auth/github/login",
   summary: "Start GitHub sign-in (redirects to GitHub)",
-  responses: { 303: { description: "Redirect to GitHub" }, 500: errors[500] },
+  responses: { 303: { description: "Redirect to GitHub" }, 503: { description: "GitHub sign-in is not configured", content: { "application/json": { schema: ErrorBody } } }, 500: errors[500] },
 });
 
 const callbackRoute = createRoute({

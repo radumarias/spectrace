@@ -224,8 +224,8 @@ describe("GitHub App", () => {
     env.GITHUB_APP_PRIVATE_KEY = "";
     try {
       const res = await call("/api/github/repos", { headers: { cookie: session } });
-      expect(res.status).toBe(500);
-      expect(await res.json()).toEqual({ error: { code: "internal", message: "internal server error" } });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: { code: "not_configured", message: "GitHub App is not configured on this server" } });
     } finally {
       env.GITHUB_APP_PRIVATE_KEY = saved;
     }

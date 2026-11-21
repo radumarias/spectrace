@@ -27,7 +27,7 @@ const installRoute = createRoute({
   method: "get",
   path: "/api/github/install",
   summary: "Start installing the GitHub App (redirects to GitHub)",
-  responses: { 303: { description: "Redirect to GitHub's install page" }, 401: err("Not signed in"), 500: err("App not configured") },
+  responses: { 303: { description: "Redirect to GitHub's install page" }, 401: err("Not signed in"), 503: err("App not configured") },
 });
 
 const installCallbackRoute = createRoute({

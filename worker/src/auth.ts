@@ -30,7 +30,7 @@ export interface GithubConfig {
 export function githubConfig(c: Context<AppEnv>): GithubConfig {
   const { GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, PUBLIC_URL, GITHUB_OAUTH_URL, GITHUB_API_URL } = c.env;
   if (!GITHUB_CLIENT_ID?.trim() || !GITHUB_CLIENT_SECRET?.trim()) {
-    throw new AppError("internal", "GitHub sign-in is not configured (GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET)");
+    throw new AppError("not_configured", "GitHub sign-in is not configured on this server");
   }
   const publicUrl = (PUBLIC_URL?.trim() || new URL(c.req.url).origin).replace(/\/+$/, "");
   return {
