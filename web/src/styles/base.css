@@ -148,3 +148,5 @@ figcaption{font:400 10px var(--f-mono);color:var(--muted)}
 .dl-add{background:var(--ok-soft)}.dl-del{background:var(--bad-soft)}
 .dl-hunk{background:var(--accent-soft);color:var(--accent)}.dl-hunk .dt{grid-column:1/-1;padding-left:12px}
 .dl-note{color:var(--muted)}
+.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.box{background:var(--sunk);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:13px}

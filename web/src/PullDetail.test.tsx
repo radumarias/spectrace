@@ -192,7 +192,7 @@ it("shows the check runs and a summary of them", async () => {
     ],
   });
   at("/pr/pr-1");
-  expect(await screen.findByText("checks failing")).toBeTruthy();
+  expect(await screen.findByText("tests 1/3")).toBeTruthy();
   const link = screen.getByRole("link", { name: "Web (tsc, vitest)" });
   expect(link.getAttribute("href")).toContain("/actions/runs/1");
   expect(within(link.closest("li")!).getByText("failure")).toBeTruthy();
@@ -262,4 +262,18 @@ it("reconnects with a growing wait and catches up on what it missed", async () =
   } finally {
     vi.useRealTimers();
   }
+});
+
+it("shows the gates, the review card and the context the reviewer would use", async () => {
+  server({ ...PULL, checksState: "failing" });
+  const user = userEvent.setup();
+  at("/pr/pr-1");
+  expect(await screen.findByText("No agent review yet")).toBeTruthy();
+  expect(screen.getByText("○ Tests pass")).toBeTruthy();
+  expect(screen.getByText(/Your approval · 0\/1/)).toBeTruthy();
+  expect(screen.getByText("2 gates open")).toBeTruthy();
+  expect(screen.getByText("Edit context").getAttribute("href")).toBe("/project");
+  expect((screen.getByRole("button", { name: "Run agent review" }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(screen.getByRole("tab", { name: "Findings" }));
+  expect(screen.getByText("No agent review yet")).toBeTruthy();
 });
