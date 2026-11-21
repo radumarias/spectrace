@@ -4,7 +4,9 @@ use serde_json::{json, Value};
 use crate::{AppError, AppState};
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/api/health", get(health))
+    Router::new()
+        .route("/api/health", get(health))
+        .merge(crate::jobs::router())
 }
 
 /// Liveness plus a database round trip, so a broken database shows up here.

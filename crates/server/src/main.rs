@@ -1,4 +1,4 @@
-use spectrace_server::{app, connect, init_logging, AppState, Config};
+use spectrace_server::{app, connect, init_logging, jobs, AppState, Config};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -13,6 +13,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let db = connect(&config.database_url).await?;
     tracing::info!("database ready, migrations applied");
+
+    tokio::spawn(jobs::run_reaper(db.clone()));
 
     let listener = tokio::net::TcpListener::bind(config.bind_addr).await?;
     tracing::info!(addr = %config.bind_addr, "spectrace-server listening");

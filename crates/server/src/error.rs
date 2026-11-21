@@ -13,6 +13,8 @@ pub enum AppError {
     Unauthorized(String),
     #[error("bad gateway: {0}")]
     Upstream(String),
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("configuration error: {0}")]
     Config(String),
     #[error("database error: {0}")]
@@ -30,6 +32,7 @@ impl AppError {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Upstream(_) => StatusCode::BAD_GATEWAY,
+            Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Database(_) | Self::Migrate(_) | Self::Config(_) | Self::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -42,6 +45,7 @@ impl AppError {
             Self::BadRequest(_) => "bad_request",
             Self::Unauthorized(_) => "unauthorized",
             Self::Upstream(_) => "upstream",
+            Self::Conflict(_) => "conflict",
             Self::Config(_) => "config",
             Self::Database(_) => "database",
             Self::Migrate(_) => "migration",
