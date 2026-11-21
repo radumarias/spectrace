@@ -34,6 +34,9 @@ const Pull = z
     updatedAt: z.string(),
     mergedAt: z.string().nullable(),
     syncedAt: z.string(),
+    testsTotal: z.number().int().openapi({ description: "Check runs of the head commit (a re-run replaces the earlier run of the same name)." }),
+    testsPassed: z.number().int().openapi({ description: "Of those, completed with success, neutral or skipped." }),
+    testsFailed: z.number().int().openapi({ description: "Of those, completed with any other conclusion." }),
   })
   .openapi("Pull");
 
@@ -115,9 +118,20 @@ interface PullRow {
   merged_at: string | null;
   synced_at: string;
   needs: number;
+  tests_total: number;
+  tests_passed: number;
+  tests_failed: number;
 }
 
-const select = (user: number) => `SELECT p.*, r.full_name AS repo, ${needs(user)} AS needs
+// The latest run of each check name on the head commit; `extra` narrows which of them are counted.
+const runs = (extra: string) =>
+  `(SELECT COUNT(*) FROM pr_check_runs c WHERE c.repo_id = p.repo_id AND c.head_sha = p.head_sha ${extra}
+      AND c.github_check_run_id = (SELECT MAX(x.github_check_run_id) FROM pr_check_runs x WHERE x.repo_id = c.repo_id AND x.head_sha = c.head_sha AND x.name = c.name))`;
+const PASSED = "AND c.status = 'completed' AND c.conclusion IN ('success', 'neutral', 'skipped')";
+const FAILED = "AND c.status = 'completed' AND COALESCE(c.conclusion, '') NOT IN ('success', 'neutral', 'skipped')";
+
+const select = (user: number) => `SELECT p.*, r.full_name AS repo, ${needs(user)} AS needs,
+  ${runs("")} AS tests_total, ${runs(PASSED)} AS tests_passed, ${runs(FAILED)} AS tests_failed
   FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id`;
 
 function toPull(r: PullRow): z.infer<typeof Pull> {
@@ -140,6 +154,9 @@ function toPull(r: PullRow): z.infer<typeof Pull> {
     updatedAt: r.github_updated_at,
     mergedAt: r.merged_at,
     syncedAt: r.synced_at,
+    testsTotal: r.tests_total,
+    testsPassed: r.tests_passed,
+    testsFailed: r.tests_failed,
   };
 }
 

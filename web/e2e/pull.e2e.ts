@@ -6,7 +6,7 @@ const PROJECT = {
 };
 const PULL = {
   id: "pr-1", repo: "acme/shop", number: 58, title: "Checkout: show decline reason inline", author: "ana", state: "open", draft: false,
-  needsYou: true, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
+  needsYou: true, testsTotal: 0, testsPassed: 0, testsFailed: 0, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
   additions: 36, deletions: 6, changedFiles: 2, createdAt: "2026-11-21T10:00:00Z", updatedAt: "2026-11-21T11:00:00Z", mergedAt: null,
   syncedAt: "2026-11-21T11:05:00Z", headSha: "abc123", checks: [], checksState: "none",
   body: "The declined screen shows why the card was declined, next to the retry button.",

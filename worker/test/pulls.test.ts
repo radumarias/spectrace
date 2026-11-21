@@ -66,6 +66,22 @@ const list = async (s: Seed, query = "") => {
 };
 
 describe("GET /api/projects/{id}/pulls", () => {
+  it("counts the latest check run of each name on the head commit", async () => {
+    const s = await seed();
+    const run = (rid: number, name: string, status: string, conclusion: string | null) =>
+      env.DB.prepare("INSERT INTO pr_check_runs (repo_id, github_check_run_id, head_sha, name, status, conclusion) VALUES (?1, ?2, 'sha', ?3, ?4, ?5)").bind(s.shop, rid, name, status, conclusion);
+    await env.DB.batch([
+      run(1, "build", "completed", "success"),
+      run(2, "test", "completed", "failure"),
+      run(3, "test", "completed", "success"), // re-run replaces the failure
+      run(4, "lint", "completed", "failure"),
+      run(5, "deploy", "in_progress", null),
+    ]);
+    const body = await list(s);
+    expect(body.pulls.find((p) => p.repo === "acme/shop" && p.number === 1)).toMatchObject({ testsTotal: 4, testsPassed: 2, testsFailed: 1 });
+    expect(body.pulls.find((p) => p.repo === "acme/api" && p.number === 1)).toMatchObject({ testsTotal: 0, testsPassed: 0, testsFailed: 0 });
+  });
+
   it("filter=needs: open, not draft; most recently updated first", async () => {
     const s = await seed();
     const body = await list(s, "?filter=needs");
@@ -147,6 +163,9 @@ describe("GET /api/projects/{id}/pulls", () => {
       updatedAt: "2026-11-08T00:00:00Z",
       mergedAt: "2026-11-08T00:00:00Z",
       syncedAt: expect.any(String),
+      testsTotal: 0,
+      testsPassed: 0,
+      testsFailed: 0,
     });
   });
 

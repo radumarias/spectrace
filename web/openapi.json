@@ -336,6 +336,18 @@
           },
           "syncedAt": {
             "type": "string"
+          },
+          "testsTotal": {
+            "type": "integer",
+            "description": "Check runs of the head commit (a re-run replaces the earlier run of the same name)."
+          },
+          "testsPassed": {
+            "type": "integer",
+            "description": "Of those, completed with success, neutral or skipped."
+          },
+          "testsFailed": {
+            "type": "integer",
+            "description": "Of those, completed with any other conclusion."
           }
         },
         "required": [
@@ -356,7 +368,10 @@
           "createdAt",
           "updatedAt",
           "mergedAt",
-          "syncedAt"
+          "syncedAt",
+          "testsTotal",
+          "testsPassed",
+          "testsFailed"
         ]
       },
       "PullCounts": {

@@ -36,6 +36,12 @@ function status(p: Pull): { tone: PillTone; text: string } {
   return { tone: "warn", text: "open" };
 }
 
+function testsTone(p: Pull): PillTone {
+  if (p.testsTotal === 0) return "idle";
+  if (p.testsFailed > 0) return "bad";
+  return p.testsPassed === p.testsTotal ? "ok" : "warn";
+}
+
 function PullRow({ pull }: { pull: Pull }) {
   const st = status(pull);
   return (
@@ -44,7 +50,7 @@ function PullRow({ pull }: { pull: Pull }) {
         <span className="meta">{pull.repo} #{pull.number} · {pull.author} · {ago(pull.updatedAt)}</span>
         <b style={{ font: "600 15.5px var(--f-display)" }}>{pull.title}</b>
         <div className="btns" style={{ gap: 6 }}>
-          <Pill tone="idle">tests not run</Pill>
+          <Pill tone={testsTone(pull)}>{pull.testsTotal === 0 ? "tests not run" : `tests ${pull.testsPassed}/${pull.testsTotal}`}</Pill>
           <Pill tone="idle">risk not rated</Pill>
           <Pill tone="idle">+{pull.additions} −{pull.deletions} · {pull.changedFiles} {pull.changedFiles === 1 ? "file" : "files"}</Pill>
         </div>
