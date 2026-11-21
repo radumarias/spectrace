@@ -904,6 +904,162 @@
         }
       }
     },
+    "/api/projects/{id}/repos": {
+      "post": {
+        "summary": "Add a repository to a project",
+        "description": "Accepts owner/repo or a GitHub link. The repository must be one the GitHub App is installed on for the signed-in user, and not already in the project.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repo": {
+                    "type": "string",
+                    "description": "owner/repo, or a link to the repository on GitHub",
+                    "example": "acme/shop"
+                  }
+                },
+                "required": [
+                  "repo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The attached repository",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectRepo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty, or not owner/repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not reachable through the user's GitHub App installations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already in this project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitHub failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/repos/{repoId}": {
+      "delete": {
+        "summary": "Remove a repository from a project",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "repoId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed"
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{projectId}/jobs": {
       "post": {
         "summary": "Queue a job for a project (owner only)",

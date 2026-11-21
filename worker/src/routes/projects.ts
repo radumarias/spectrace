@@ -7,6 +7,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { requireUser } from "../auth";
 import type { AppEnv } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { appConfig, userRepos } from "../github-app";
 import { enqueueIndexes } from "../jobs/index-repo";
 
 const MAX_NAME = 120;
@@ -57,6 +58,9 @@ const UpdateBody = z.object({
   context: z.string().optional(),
   repos: z.array(RepoInput).optional(),
 });
+
+const AddRepoBody = z.object({ repo: z.string().openapi({ description: "owner/repo, or a link to the repository on GitHub", example: "acme/shop" }) });
+const RepoParams = z.object({ id: z.string(), repoId: z.string() });
 
 type RepoInputT = z.infer<typeof RepoInput>;
 interface CleanRepo {
@@ -112,6 +116,45 @@ const reindexRoute = createRoute({
   request: { params: IdParam },
   responses: { 200: { description: "The project, with its repos back to pending", content: json(ProjectSchema) }, 401: errors[401], 404: errors[404] },
 });
+
+const addRepoRoute = createRoute({
+  method: "post",
+  path: "/api/projects/{id}/repos",
+  summary: "Add a repository to a project",
+  description: "Accepts owner/repo or a GitHub link. The repository must be one the GitHub App is installed on for the signed-in user, and not already in the project.",
+  request: { params: IdParam, body: { content: json(AddRepoBody), required: true } },
+  responses: {
+    201: { description: "The attached repository", content: json(RepoSchema) },
+    400: err("Empty, or not owner/repo"),
+    401: errors[401],
+    403: err("Not reachable through the user's GitHub App installations"),
+    404: errors[404],
+    409: err("Already in this project"),
+    502: err("GitHub failed"),
+  },
+});
+const removeRepoRoute = createRoute({
+  method: "delete",
+  path: "/api/projects/{id}/repos/{repoId}",
+  summary: "Remove a repository from a project",
+  request: { params: RepoParams },
+  responses: { 204: { description: "Removed" }, 401: errors[401], 404: errors[404] },
+});
+
+/**
+ * What a person typed into the repo box, as owner/name: `owner/repo`, or a GitHub link such as
+ * https://github.com/owner/repo, .../repo.git or .../repo/pull/3. Anything else comes back unchanged
+ * so the caller can reject it.
+ */
+export function normalizeRepo(input: string): string {
+  const v = input.trim();
+  const link = /^(?:https?:\/\/)?(?:www\.)?github\.com\/(.*)$/i.exec(v);
+  const path = (link ? (link[1] ?? "").split(/[?#]/)[0] ?? "" : v).replace(/\/+$/, "");
+  const [owner, name, ...rest] = path.split("/");
+  const tidy = (name ?? "").replace(/\.git$/i, "");
+  if (link) return owner && name ? `${owner}/${tidy}` : path;
+  return rest.length || !name ? path : `${owner ?? ""}/${tidy}`;
+}
 
 function cleanName(name: string): string {
   const n = name.trim();
@@ -324,6 +367,65 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
       .all<{ id: string }>();
     await enqueueIndexes(c.env, id, results.map((r) => r.id));
     return c.json(await load(c.env.DB, user.id, id), 200);
+  });
+
+  app.openapi(addRepoRoute, async (c) => {
+    const user = await requireUser(c);
+    const { id } = c.req.valid("param");
+    const { repo: typed } = c.req.valid("json");
+    await requireProjectOwner(c.env.DB, user.id, id);
+
+    // The three messages below are the prototype's, word for word; the web app shows them as they are.
+    const name = normalizeRepo(typed);
+    if (!name) throw new AppError("bad_request", "Type a repo first, like owner/repo.");
+    const parts = name.split("/");
+    if (parts.length !== 2 || !parts.every((p) => REPO_PART.test(p))) throw new AppError("bad_request", "That does not look like owner/repo.");
+
+    const db = c.env.DB;
+    const { results: current } = await db.prepare("SELECT full_name FROM project_repos WHERE project_id = ?1").bind(id).all<{ full_name: string }>();
+    const lower = name.toLowerCase();
+    if (current.some((r) => r.full_name.toLowerCase() === lower)) throw new AppError("conflict", `${name} is already in this project.`);
+    if (current.length >= MAX_REPOS) throw AppError.badRequest(`a project can have at most ${MAX_REPOS} repositories`);
+
+    const known = (await userRepos(appConfig(c), db, user.id)).find((r) => r.full_name.toLowerCase() === lower);
+    if (!known) {
+      throw new AppError("forbidden", `${name} is not available to the GitHub App. Install the App on it, then add it again.`);
+    }
+    // A renamed repo keeps its GitHub id: still a duplicate.
+    const same = await db.prepare("SELECT full_name FROM project_repos WHERE project_id = ?1 AND github_repo_id = ?2").bind(id, known.id).first<{ full_name: string }>();
+    if (same) throw new AppError("conflict", `${known.full_name} is already in this project.`);
+
+    const now = new Date().toISOString();
+    const repoId = crypto.randomUUID();
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO project_repos (id, project_id, github_repo_id, full_name, default_branch, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+        )
+        .bind(repoId, id, known.id, known.full_name, known.default_branch, now),
+      db.prepare("UPDATE projects SET updated_at = ?2 WHERE id = ?1").bind(id, now),
+    ]);
+    const row = await db
+      .prepare(`SELECT ${REPO_COLUMNS} FROM project_repos WHERE id = ?1`)
+      .bind(repoId)
+      .first<RepoRow>();
+    if (!row) throw new AppError("internal", "added repository not found");
+    await enqueueIndexes(c.env, id, [repoId]);
+    return c.json(toRepo(row), 201);
+  });
+
+  app.openapi(removeRepoRoute, async (c) => {
+    const user = await requireUser(c);
+    const { id, repoId } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, user.id, id);
+    const now = new Date().toISOString();
+    const [res] = await c.env.DB.batch([
+      c.env.DB.prepare("DELETE FROM project_repos WHERE id = ?1 AND project_id = ?2").bind(repoId, id),
+      c.env.DB.prepare("UPDATE projects SET updated_at = ?2 WHERE id = ?1").bind(id, now),
+    ]);
+    if (!res || res.meta.changes === 0) throw AppError.notFound(`repository ${repoId}`);
+    return c.body(null, 204);
   });
 
   app.openapi(deleteRoute, async (c) => {

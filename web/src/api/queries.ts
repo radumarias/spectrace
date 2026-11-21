@@ -7,7 +7,7 @@ export type User = components["schemas"]["User"];
 export type Project = components["schemas"]["Project"];
 
 /** A repository GitHub lets the user pick (`GET /api/github/repos`, from the GitHub App installation). */
-export type GithubRepo = { id: number; full_name: string; default_branch: string };
+export type GithubRepo = components["schemas"]["GithubRepo"];
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -134,17 +134,14 @@ export function useCreateProject() {
 /**
  * Repos from the user's GitHub App installation, for the suggestion chips. Empty when the App is
  * not installed or not configured: typing owner/repo or pasting a link still works.
- * Not in the generated client until T1.2 (`/api/github/repos`) is on main; switch to `api.GET` then.
  */
 export function useGithubRepos() {
   return useQuery({
     queryKey: keys.githubRepos,
     queryFn: async (): Promise<GithubRepo[]> => {
       try {
-        const res = await fetch("/api/github/repos");
-        if (!res.ok) return [];
-        const list = (await res.json()) as GithubRepo[];
-        return Array.isArray(list) ? list : [];
+        const { data } = await api.GET("/api/github/repos");
+        return data ?? [];
       } catch {
         return [];
       }
