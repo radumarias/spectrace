@@ -2013,6 +2013,13 @@ export interface components {
             model: components["schemas"]["SpecModel"];
             diagnostics: components["schemas"]["SpecDiagnostic"][];
             anchors: components["schemas"]["SpecAnchor"][];
+            /** @description The spec as devpage server renders it, on this origin; null while devpage is off or has not published it. */
+            devpage: {
+                id: string;
+                version: number;
+                /** @example /d/6f1c2a9e-0000-4000-8000-000000000000/ */
+                url: string;
+            } | null;
         };
         /** @description Null when the file has errors; see diagnostics. */
         SpecModel: {

@@ -11,7 +11,7 @@ compatibility_flags = ["nodejs_compat"]
 directory = "../web/dist/client"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*"]
+run_worker_first = ["/api/*", "/d/*", "/__devpage/*"]
 
 [[d1_databases]]
 binding = "DB"
@@ -51,3 +51,25 @@ class_name = "ProjectHub"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectHub"]
+
+# devpage server (radumarias/devpage) renders the specs: one container, since
+# its store is one SQLite file (Litestream keeps it in the bucket). It is used
+# only once DEVPAGE_BUCKET_URL is set; see docs/deploy.md and src/devpage.ts.
+[[containers]]
+class_name = "DevpageServer"
+image = "../containers/devpage/Dockerfile"
+max_instances = 1
+instance_type = "standard-1"
+
+[[durable_objects.bindings]]
+name = "DEVPAGE"
+class_name = "DevpageServer"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["DevpageServer"]
+
+# `just dev` and the tests need no Docker: the container is never built
+# locally. Point DEVPAGE_ORIGIN at a `devpage server` in .dev.vars to try it.
+[dev]
+enable_containers = false

@@ -12,6 +12,7 @@
     "openapi": "tsx scripts/openapi.ts"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.7",
     "@hono/zod-openapi": "^1.6.3",
     "hono": "^4.13.19",
     "zod": "^4.6.7"

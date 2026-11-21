@@ -61,3 +61,6 @@ details.flash{outline:2px solid var(--accent);outline-offset:4px}
 .spec-dia .pele-node[data-st=bad] :is(rect,polygon,circle){fill:var(--bad-soft);stroke:var(--bad)}
 .spec-dia .pele-node[data-st=root] :is(rect,polygon,circle){fill:var(--fg);stroke:var(--fg)}
 .spec-dia .pele-node[data-st=root] text{fill:var(--bg)}
+
+/* devpage server's page for the spec, on this origin (/d/<id>/). */
+.devpage-frame{display:block;width:100%;height:min(78vh,900px);border:1px solid var(--line);border-radius:10px;background:var(--surface)}

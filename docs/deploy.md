@@ -32,9 +32,31 @@ The script (`scripts/deploy.sh`):
 
 The Worker is published as `spectrace` at `https://spectrace.<your-subdomain>.workers.dev`; wrangler prints the URL at the end. Check it with `curl https://<url>/api/health`.
 
+## devpage server
+
+Specs are rendered by devpage server from Radu's fork ([radumarias/devpage](https://github.com/radumarias/devpage)), run as a [Cloudflare Container](https://developers.cloudflare.com/containers/) beside the Worker. The image is `containers/devpage/Dockerfile`: the fork's own `deploy/server` image, built from the fork at a pinned commit (`DEVPAGE_REV`). `wrangler deploy` builds and pushes it, so the machine that runs `just deploy` needs Docker. Containers need the Workers Paid plan.
+
+Each index publishes every spec that changed as a devpage document (`POST /api/documents?entry=<flow>.md`); the Spec page's Markdown tab shows it at `/d/<id>/`, which the Worker proxies for the project's owner only.
+
+devpage keeps every version and its SQLite store (through Litestream) in a bucket, so the container's disk is only a cache. One-time setup with R2:
+
+1. Create an R2 bucket, for example `spectrace-devpage`.
+2. Create an R2 API token with Object Read & Write on that bucket; note its Access Key ID and Secret Access Key.
+3. Set the Worker's variables and secrets:
+
+   ```sh
+   cd worker
+   npx wrangler secret put AWS_ACCESS_KEY_ID
+   npx wrangler secret put AWS_SECRET_ACCESS_KEY
+   npx wrangler secret put AWS_ENDPOINT_URL      # https://<account id>.r2.cloudflarestorage.com
+   npx wrangler secret put DEVPAGE_BUCKET_URL    # s3://spectrace-devpage/docs
+   ```
+
+Until `DEVPAGE_BUCKET_URL` is set, devpage is off: nothing is published and the Markdown tab shows spectrace's own rendering. Locally, `just dev` never builds the image; to try devpage, run `devpage server` (with `DEVPAGE_BUCKET_URL=file:///some/folder DEVPAGE_DATA_DIR=/some/data DEVPAGE_USER_HEADER=x-spectrace-user`) and put `DEVPAGE_ORIGIN=http://127.0.0.1:3030` in `worker/.dev.vars`.
+
 ## Cost
 
-Workers, D1 and static assets are all within the free plan for this app at its current size. Nothing in `just deploy` enables a paid product.
+Workers, D1 and static assets are all within the free plan for this app at its current size. The devpage container needs the Workers Paid plan; it sleeps after 30 minutes without requests, and R2 storage for spec versions is small.
 
 ## Not yet deployed
 

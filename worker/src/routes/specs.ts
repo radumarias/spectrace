@@ -3,6 +3,7 @@
 // code and tests anchored to it, for the spec page.
 import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
+import { devpageOn } from "../devpage";
 import type { AppEnv } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
@@ -103,6 +104,14 @@ const SpecDetail = SpecSummary.extend({
   model: Model.nullable().openapi({ description: "Null when the file has errors; see diagnostics." }),
   diagnostics: z.array(Diagnostic),
   anchors: z.array(SpecAnchor),
+  devpage: z
+    .object({
+      id: z.string(),
+      version: z.number().int(),
+      url: z.string().openapi({ example: "/d/6f1c2a9e-0000-4000-8000-000000000000/" }),
+    })
+    .nullable()
+    .openapi({ description: "The spec as devpage server renders it, on this origin; null while devpage is off or has not published it." }),
 }).openapi("SpecDetail");
 
 const err = (description: string) => ({ description, content: { "application/json": { schema: ErrorBody } } });
@@ -190,10 +199,10 @@ export function registerSpecs(app: OpenAPIHono<AppEnv>) {
     const { projectId, specId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, user.id, projectId);
     const row = await c.env.DB.prepare(
-      `SELECT ${COLS}, s.source, s.sha, s.model FROM specs s JOIN project_repos r ON r.id = s.repo_id WHERE s.id = ?1 AND s.project_id = ?2`,
+      `SELECT ${COLS}, s.source, s.sha, s.model, s.devpage_id, s.devpage_version FROM specs s JOIN project_repos r ON r.id = s.repo_id WHERE s.id = ?1 AND s.project_id = ?2`,
     )
       .bind(specId, projectId)
-      .first<SpecRow & { source: string; sha: string | null; model: string | null }>();
+      .first<SpecRow & { source: string; sha: string | null; model: string | null; devpage_id: string | null; devpage_version: number | null }>();
     if (!row) throw AppError.notFound(`spec ${specId}`);
     const [edges, anchors] = await c.env.DB.batch([
       c.env.DB.prepare("SELECT spec_id, from_node, label, to_node FROM spec_edges WHERE spec_id = ?1").bind(specId),
@@ -208,6 +217,7 @@ export function registerSpecs(app: OpenAPIHono<AppEnv>) {
         model: row.model ? (JSON.parse(row.model) as z.infer<typeof Model>) : null,
         diagnostics: JSON.parse(row.diagnostics) as z.infer<typeof Diagnostic>[],
         anchors: (anchors?.results ?? []) as z.infer<typeof SpecAnchor>[],
+        devpage: row.devpage_id && devpageOn(c.env) ? { id: row.devpage_id, version: row.devpage_version ?? 1, url: `/d/${row.devpage_id}/` } : null,
       },
       200,
     );

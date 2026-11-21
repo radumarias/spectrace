@@ -29,18 +29,59 @@ const REPOS: Record<string, { installation: number; meta: object; tree: object |
   "other/private": { installation: 2002, meta: { id: 504, default_branch: "main" }, tree: { sha: "x", tree: [] }, languages: {} },
 };
 
+const DEVPAGE = "http://devpage.test";
+
 let calls: string[] = [];
+/** What the fake devpage server was asked: method, path and query, the author header, and for a publish the zip's one file. */
+let devpageCalls: { req: string; author: string | null; file?: { path: string; text: string } }[] = [];
+let devpageDocs = new Map<string, number>();
+let devpageRefuses = false;
+
+/** The one file of a stored zip (src/zip.ts). */
+function unzipOne(bytes: Uint8Array): { path: string; text: string } {
+  const v = new DataView(bytes.buffer, bytes.byteOffset);
+  expect(v.getUint32(0, true)).toBe(0x04034b50);
+  const size = v.getUint32(18, true);
+  const nameLen = v.getUint16(26, true);
+  const dec = new TextDecoder();
+  return { path: dec.decode(bytes.subarray(30, 30 + nameLen)), text: dec.decode(bytes.subarray(30 + nameLen, 30 + nameLen + size)) };
+}
+
+/** devpage server's API and pages as far as spectrace uses them. */
+async function fakeDevpage(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const call: (typeof devpageCalls)[number] = { req: `${req.method} ${url.pathname}${url.search}`, author: req.headers.get("x-spectrace-user") };
+  devpageCalls.push(call);
+  if (req.method === "POST") {
+    call.file = unzipOne(new Uint8Array(await req.arrayBuffer()));
+    if (devpageRefuses) return new Response("broken link: gone.md", { status: 422 });
+    const add = /^\/api\/documents\/([^/]+)\/versions$/.exec(url.pathname);
+    const id = add ? add[1]! : crypto.randomUUID();
+    if (add && !devpageDocs.has(id)) return new Response("not found", { status: 404 });
+    const version = (devpageDocs.get(id) ?? 0) + 1;
+    devpageDocs.set(id, version);
+    return Response.json({ id, version, url: `/d/${id}/` }, { status: 201 });
+  }
+  const page = /^\/d\/([^/]+)\//.exec(url.pathname);
+  if (page && devpageDocs.has(page[1]!)) return new Response(`<h1>devpage ${page[1]} v${devpageDocs.get(page[1]!)}</h1>`, { headers: { "content-type": "text/html" } });
+  if (url.pathname.startsWith("/__devpage/")) return new Response("/* asset */", { headers: { "content-type": "text/css" } });
+  return new Response("not found", { status: 404 });
+}
 let tarballs: string[] = []; // refs whose archive was read
 let flaky = 0; // how many times the languages call should answer 502 before working
 
 function mockGithub() {
   const real = globalThis.fetch;
   calls = [];
+  devpageCalls = [];
+  devpageDocs = new Map();
+  devpageRefuses = false;
   tarballs = [];
   flaky = 0;
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const req = new Request(input as RequestInfo, init);
     const url = new URL(req.url);
+    if (url.origin === DEVPAGE) return fakeDevpage(req);
     if (url.origin !== API) return real(input, init);
     calls.push(`${req.method} ${url.pathname}`);
     const mint = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(url.pathname);
@@ -403,5 +444,73 @@ describe("spec index", () => {
     expect((await call(`/api/projects/${project.id}/specs/nope`, cookie)).status).toBe(404);
     // Another project's spec is not reachable through this project.
     expect((await call(`/api/projects/${other.project.id}/specs/${spec!.id}`, other.cookie)).status).toBe(404);
+  });
+});
+
+describe("devpage", () => {
+  const detailOf = async (cookie: string, projectId: string, specId: string) =>
+    (await (await call(`/api/projects/${projectId}/specs/${specId}`, cookie)).json()) as SpecDetail & { devpage: { id: string; version: number; url: string } | null };
+  const reindex = async (cookie: string, projectId: string) => {
+    await post(`/api/projects/${projectId}/reindex`, cookie);
+    await deliver(...(await jobsOf(projectId)).filter((j) => j.state === "queued").map((j) => j.id));
+  };
+
+  it("publishes each spec once per change and serves its page on this origin, to the owner only", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const [spec] = await specsOf(cookie, project.id);
+
+    // Version 1: the spec file alone, as the document's entry.
+    expect(devpageCalls).toEqual([{ req: "POST /api/documents?entry=checkout.md", author: "spectrace", file: { path: "checkout.md", text: SHOP["spec/checkout.md"] } }]);
+    const detail = await detailOf(cookie, project.id, spec!.id);
+    expect(detail.devpage).toMatchObject({ version: 1 });
+    expect(detail.devpage!.url).toBe(`/d/${detail.devpage!.id}/`);
+
+    // The page is proxied for the owner, as them; its cookie never reaches devpage.
+    devpageCalls = [];
+    const page = await call(detail.devpage!.url, cookie);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe(`<h1>devpage ${detail.devpage!.id} v1</h1>`);
+    const login = cookie.replace("spectrace_session=", "");
+    expect(devpageCalls).toEqual([{ req: `GET /d/${detail.devpage!.id}/`, author: login }]);
+    expect((await call("/__devpage/app.css", cookie)).status).toBe(200);
+
+    // Nobody else reaches it, signed in or not; an unknown document is a 404 before devpage is asked.
+    const other = await setup([]);
+    devpageCalls = [];
+    expect((await call(detail.devpage!.url, other.cookie)).status).toBe(404);
+    expect((await call(detail.devpage!.url, "")).status).toBe(401);
+    expect((await call(`/d/${crypto.randomUUID()}/`, cookie)).status).toBe(404);
+    expect(devpageCalls).toEqual([]);
+
+    // Unchanged on re-index: nothing is published. Changed: the next version of the same document.
+    await reindex(cookie, project.id);
+    expect(devpageCalls).toEqual([]);
+    const changed = SHOP["spec/checkout.md"]!.replace("disable the checkout button", "hide the checkout button");
+    REPOS["acme/shop"]!.files = { ...SHOP, "spec/checkout.md": changed };
+    try {
+      await reindex(cookie, project.id);
+      expect(devpageCalls.map((c) => c.req)).toEqual([`POST /api/documents/${detail.devpage!.id}/versions?entry=checkout.md`]);
+      expect(devpageCalls[0]!.file?.text).toBe(changed);
+      expect((await detailOf(cookie, project.id, spec!.id)).devpage).toMatchObject({ id: detail.devpage!.id, version: 2 });
+    } finally {
+      REPOS["acme/shop"]!.files = SHOP;
+    }
+  });
+
+  it("keeps the index when devpage refuses a spec, and tries again on the next index", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    devpageRefuses = true;
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const [spec] = await specsOf(cookie, project.id);
+    expect(spec).toMatchObject({ steps: 5 });
+    expect((await read(cookie, project.id)).repos[0]!.index_state).toBe("ready");
+    expect((await detailOf(cookie, project.id, spec!.id)).devpage).toBeNull();
+
+    devpageRefuses = false;
+    devpageCalls = [];
+    await reindex(cookie, project.id);
+    expect(devpageCalls.map((c) => c.req)).toEqual(["POST /api/documents?entry=checkout.md"]);
+    expect((await detailOf(cookie, project.id, spec!.id)).devpage).toMatchObject({ version: 1 });
   });
 });

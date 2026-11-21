@@ -3,6 +3,7 @@
 // specs, requirements and anchors parsed from one archive of the default branch.
 // One job per repo; `target` is the `project_repos.id`. Re-running it is safe:
 // it only overwrites the same rows.
+import { publishSpecs } from "../devpage";
 import type { Bindings } from "../env";
 import { AppError } from "../error";
 import { appConfigFromEnv, appJwt, ghHeaders, installationToken, linkRepoInstallation, type AppConfig } from "../github-app";
@@ -157,7 +158,14 @@ async function readRepo(job: JobRow, ctx: JobContext, repo: RepoRow): Promise<vo
   )
     .bind(repo.id, info.id, info.default_branch, JSON.stringify(languages), fileCount, truncated || archiveTruncated ? 1 : 0, sha)
     .run();
-  log("info", "repo indexed", { jobId: job.id, repo: repo.full_name, files: fileCount, specs: index.specs.length, anchors: index.anchors.length }, env.LOG_FORMAT);
+  // devpage renders each spec; a spec it refuses keeps its last version, and the index stands.
+  const devpage = await publishSpecs(env, repo.id, "spectrace");
+  log(
+    "info",
+    "repo indexed",
+    { jobId: job.id, repo: repo.full_name, files: fileCount, specs: index.specs.length, anchors: index.anchors.length, devpage },
+    env.LOG_FORMAT,
+  );
 }
 
 /** Replaces the repo's specs, edges and anchors in one transaction. A spec keeps its id while its path stays. */
