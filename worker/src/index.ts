@@ -1,9 +1,12 @@
 import { createApp } from "./app";
 import type { Bindings } from "./env";
-import { consume, type JobMessage } from "./jobs/queue";
+import { INDEX_KIND, indexRepo } from "./jobs/index-repo";
+import { consume, registerHandler, type JobMessage } from "./jobs/queue";
 import "./jobs/sync"; // registers the "sync" job kind
 
 export { ProjectHub } from "./hub";
+
+registerHandler(INDEX_KIND, indexRepo);
 
 const app = createApp();
 

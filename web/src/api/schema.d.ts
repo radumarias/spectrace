@@ -730,6 +730,62 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/projects/{id}/reindex": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Index every repository of the project again */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The project, with its repos back to pending */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Project"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{id}/repos": {
         parameters: {
             query?: never;
@@ -1404,6 +1460,13 @@ export interface components {
             default_branch: string;
             /** @enum {string} */
             index_state: "pending" | "indexing" | "ready" | "failed";
+            languages: {
+                [key: string]: number;
+            };
+            file_count: number | null;
+            tree_truncated: boolean;
+            indexed_at: string | null;
+            index_error: string | null;
         };
         Job: {
             id: string;

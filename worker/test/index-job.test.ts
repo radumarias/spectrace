@@ -1,0 +1,277 @@
+import { createExecutionContext, createMessageBatch, getQueueResult } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hashToken } from "../src/auth";
+import { forgetInstallationTokens } from "../src/github-app";
+import worker from "../src/index";
+import { JOBS_QUEUE, type JobMessage } from "../src/jobs/queue";
+
+const API = "http://api.github.test";
+
+/** Recorded-style GitHub answers for the repos the tests use. */
+const REPOS: Record<string, { installation: number; meta: object; tree: object | 409; languages: object }> = {
+  "acme/shop": {
+    installation: 1001,
+    meta: { id: 501, default_branch: "trunk", full_name: "acme/shop" },
+    tree: { sha: "abc123", truncated: false, tree: [{ type: "tree" }, { type: "blob" }, { type: "blob" }, { type: "blob" }] },
+    languages: { Rust: 9000, TypeScript: 1200 },
+  },
+  "acme/empty": { installation: 1001, meta: { id: 502, default_branch: "main" }, tree: 409, languages: {} },
+  "acme/big": {
+    installation: 1001,
+    meta: { id: 503, default_branch: "main" },
+    tree: { sha: "def456", truncated: true, tree: [{ type: "blob" }] },
+    languages: { Go: 5 },
+  },
+  "other/private": { installation: 2002, meta: { id: 504, default_branch: "main" }, tree: { sha: "x", tree: [] }, languages: {} },
+};
+
+let calls: string[] = [];
+let flaky = 0; // how many times the languages call should answer 502 before working
+
+function mockGithub() {
+  const real = globalThis.fetch;
+  calls = [];
+  flaky = 0;
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const req = new Request(input as RequestInfo, init);
+    const url = new URL(req.url);
+    if (url.origin !== API) return real(input, init);
+    calls.push(`${req.method} ${url.pathname}`);
+    const mint = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(url.pathname);
+    if (mint) return Response.json({ token: `ghs_${mint[1]}`, expires_at: new Date(Date.now() + 3_600_000).toISOString() }, { status: 201 });
+    const inst = /^\/repos\/([^/]+\/[^/]+)\/installation$/.exec(url.pathname);
+    if (inst) {
+      const r = REPOS[inst[1]!];
+      return r ? Response.json({ id: r.installation }) : Response.json({}, { status: 404 });
+    }
+    const m = /^\/repos\/([^/]+\/[^/]+)(\/.*)?$/.exec(url.pathname);
+    const r = m && REPOS[m[1]!];
+    if (!r) return Response.json({}, { status: 404 });
+    const bearer = (req.headers.get("authorization") ?? "").replace("Bearer ", "");
+    if (bearer !== `ghs_${r.installation}`) return Response.json({}, { status: 401 });
+    const rest = m[2] ?? "";
+    if (rest === "") return Response.json(r.meta);
+    if (rest.startsWith("/git/trees/")) {
+      expect(url.searchParams.get("recursive")).toBe("1");
+      return r.tree === 409 ? Response.json({ message: "Git Repository is empty." }, { status: 409 }) : Response.json(r.tree);
+    }
+    if (rest === "/languages") {
+      if (flaky > 0) {
+        flaky--;
+        return Response.json({}, { status: 502 });
+      }
+      return Response.json(r.languages);
+    }
+    return Response.json({}, { status: 404 });
+  });
+}
+
+let n = 0;
+
+/** A signed-in user who may use installation 1001, with a project holding the given repos. */
+async function setup(repos: string[]) {
+  const login = `user-${++n}-${crypto.randomUUID().slice(0, 8)}`;
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO users (id, github_id, login) VALUES (?1, ?2, ?3)").bind(userId, 2_000_000 + n, login),
+    env.DB.prepare("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES (?1, ?2, ?3, ?4)").bind(
+      crypto.randomUUID(),
+      userId,
+      await hashToken(login),
+      new Date(Date.now() + 86_400_000).toISOString(),
+    ),
+    env.DB.prepare("INSERT OR IGNORE INTO github_installations (id, account_id, account_login, account_type, repository_selection) VALUES (1001, 1, 'acme', 'Organization', 'all')"),
+    env.DB.prepare("INSERT INTO user_installations (user_id, installation_id) VALUES (?1, 1001)").bind(userId),
+  ]);
+  const cookie = `spectrace_session=${login}`;
+  const res = await post("/api/projects", cookie, { name: "Shop", repos: repos.map((full_name) => ({ full_name })) });
+  expect(res.status).toBe(201);
+  return { cookie, project: (await res.json()) as Project };
+}
+
+interface Repo {
+  id: string;
+  full_name: string;
+  default_branch: string;
+  github_repo_id: number | null;
+  index_state: string;
+  languages: Record<string, number>;
+  file_count: number | null;
+  tree_truncated: boolean;
+  indexed_at: string | null;
+  index_error: string | null;
+}
+interface Project {
+  id: string;
+  repos: Repo[];
+}
+
+const call = (path: string, cookie: string, init: RequestInit = {}) =>
+  exports.default.fetch(new Request(`http://spectrace.test${path}`, { ...init, headers: { cookie, "content-type": "application/json", ...init.headers } }));
+const post = (path: string, cookie: string, body?: unknown) => call(path, cookie, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+const read = async (cookie: string, id: string) => (await (await call(`/api/projects/${id}`, cookie)).json()) as Project;
+
+interface JobState {
+  id: string;
+  state: string;
+  attempts: number;
+  target: string;
+}
+const jobsOf = async (projectId: string) =>
+  (await env.DB.prepare("SELECT id, state, attempts, target FROM jobs WHERE project_id = ?1 AND kind = 'index' ORDER BY rowid").bind(projectId).all<JobState>()).results;
+
+async function deliver(...jobIds: string[]) {
+  const batch = createMessageBatch<JobMessage>(
+    JOBS_QUEUE,
+    jobIds.map((jobId, i) => ({ id: `m${i}-${crypto.randomUUID()}`, timestamp: Date.now(), attempts: 1, body: { jobId } })),
+  );
+  const ctx = createExecutionContext();
+  await worker.queue(batch, env);
+  return getQueueResult(batch, ctx);
+}
+
+const eventNames = async (jobId: string) =>
+  (await env.DB.prepare("SELECT event, data FROM job_events WHERE job_id = ?1 ORDER BY id").bind(jobId).all<{ event: string; data: string }>()).results;
+
+// The queue does not deliver by itself in these tests: `deliver` plays the runtime, so each test decides when a job runs.
+const realSend = env.JOBS.send;
+beforeEach(() => {
+  forgetInstallationTokens();
+  mockGithub();
+  env.JOBS.send = () => Promise.resolve({ metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } } });
+});
+afterEach(() => {
+  env.JOBS.send = realSend;
+  vi.restoreAllMocks();
+});
+
+describe("index job", () => {
+  it("queues one job per repo when a project is created, and ends with the repo indexed", async () => {
+    const { cookie, project } = await setup(["acme/shop", "acme/empty"]);
+    expect(project.repos.map((r) => r.index_state)).toEqual(["pending", "pending"]);
+    const jobs = await jobsOf(project.id);
+    expect(jobs.map((j) => j.target).sort()).toEqual(project.repos.map((r) => r.id).sort());
+    expect(jobs.every((j) => j.state === "queued")).toBe(true);
+
+    expect((await deliver(...jobs.map((j) => j.id))).explicitAcks).toHaveLength(2);
+
+    const done = await read(cookie, project.id);
+    const shop = done.repos.find((r) => r.full_name === "acme/shop")!;
+    expect(shop).toMatchObject({
+      index_state: "ready",
+      default_branch: "trunk",
+      github_repo_id: 501,
+      file_count: 3,
+      tree_truncated: false,
+      languages: { Rust: 9000, TypeScript: 1200 },
+      index_error: null,
+    });
+    expect(shop.indexed_at).toBeTruthy();
+    // A repository with no commits is indexed too, with nothing in it.
+    expect(done.repos.find((r) => r.full_name === "acme/empty")).toMatchObject({ index_state: "ready", file_count: 0, languages: {} });
+    expect((await jobsOf(project.id)).every((j) => j.state === "succeeded")).toBe(true);
+  });
+
+  it("sends progress to watchers and never clones", async () => {
+    const { project } = await setup(["acme/shop"]);
+    const [job] = await jobsOf(project.id);
+    await deliver(job!.id);
+    const events = await eventNames(job!.id);
+    expect(events.map((e) => e.event)).toEqual(["queued", "started", "progress", "progress", "progress", "succeeded"]);
+    const stages = events.filter((e) => e.event === "progress").map((e) => JSON.parse(e.data) as { step: number; steps: number; stage: string; repoId: string });
+    expect(stages.map((s) => s.stage)).toEqual(["Reading repo details", "Reading code, docs and tests", "Reading languages"]);
+    expect(stages.every((s) => s.steps === 3 && s.repoId === project.repos[0]!.id)).toBe(true);
+    expect(calls.every((c) => c.startsWith("GET /repos/") || c.startsWith("POST /app/installations/"))).toBe(true);
+    expect(calls.some((c) => c.includes("clone") || c.includes("tarball") || c.includes("zipball"))).toBe(false);
+  });
+
+  it("records a truncated tree", async () => {
+    const { cookie, project } = await setup(["acme/big"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    expect((await read(cookie, project.id)).repos[0]).toMatchObject({ index_state: "ready", file_count: 1, tree_truncated: true });
+  });
+
+  it("retries a GitHub outage, then succeeds", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    const [job] = await jobsOf(project.id);
+    flaky = 1;
+    expect((await deliver(job!.id)).retryMessages).toHaveLength(1);
+    expect((await read(cookie, project.id)).repos[0]).toMatchObject({ index_state: "indexing" });
+    expect((await deliver(job!.id)).explicitAcks).toHaveLength(1);
+    expect((await read(cookie, project.id)).repos[0]).toMatchObject({ index_state: "ready", index_error: null });
+  });
+
+  it("fails the repo for good after the last attempt", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    const [job] = await jobsOf(project.id);
+    flaky = 99;
+    await deliver(job!.id);
+    await deliver(job!.id);
+    await deliver(job!.id);
+    expect((await jobsOf(project.id))[0]).toMatchObject({ state: "failed", attempts: 3 });
+    expect((await read(cookie, project.id)).repos[0]).toMatchObject({ index_state: "failed", index_error: "GitHub languages: status 502" });
+  });
+
+  it("fails at once when the App is not installed for the repo, or not for this user", async () => {
+    const { cookie, project } = await setup(["acme/nothing", "other/private"]);
+    for (const job of await jobsOf(project.id)) expect((await deliver(job.id)).retryMessages).toHaveLength(0);
+    const repos = (await read(cookie, project.id)).repos;
+    expect(repos.map((r) => r.index_state)).toEqual(["failed", "failed"]);
+    expect(repos.every((r) => /GitHub App is not installed on/.test(r.index_error ?? ""))).toBe(true);
+    // Never reached the repository itself with someone else's installation.
+    expect(calls.some((c) => c === "GET /repos/other/private")).toBe(false);
+  });
+
+  it("does nothing for a repo that was removed after it was queued", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    const [job] = await jobsOf(project.id);
+    expect((await call(`/api/projects/${project.id}`, cookie, { method: "PATCH", body: JSON.stringify({ repos: [{ full_name: "acme/empty" }] }) })).status).toBe(200);
+    await deliver(job!.id);
+    expect((await jobsOf(project.id)).find((j) => j.id === job!.id)?.state).toBe("succeeded");
+    expect(calls.filter((c) => c.includes("acme/shop"))).toEqual([]);
+  });
+
+  it("indexes only the repos that were added", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    const res = await call(`/api/projects/${project.id}`, cookie, { method: "PATCH", body: JSON.stringify({ repos: [{ full_name: "acme/shop" }, { full_name: "acme/empty" }] }) });
+    const updated = (await res.json()) as Project;
+    const added = updated.repos.find((r) => r.full_name === "acme/empty")!;
+    const jobs = await jobsOf(project.id);
+    expect(jobs.map((j) => j.target).sort()).toEqual([project.repos[0]!.id, added.id].sort());
+  });
+
+  it("marks the repo failed, not the request, when the queue is down", async () => {
+    env.JOBS.send = () => Promise.reject(new Error("queue down"));
+    const { project } = await setup(["acme/shop"]);
+    expect(project.repos[0]).toMatchObject({ index_state: "pending" });
+    const stored = await env.DB.prepare("SELECT index_state, index_error FROM project_repos WHERE project_id = ?1").bind(project.id).first();
+    expect(stored).toEqual({ index_state: "failed", index_error: "could not be queued" });
+  });
+});
+
+describe("re-index", () => {
+  it("queues the repos that are done or failed, and leaves running ones alone", async () => {
+    const { cookie, project } = await setup(["acme/shop", "acme/empty", "acme/big"]);
+    const first = await jobsOf(project.id);
+    await deliver(first[0]!.id, first[1]!.id); // shop and empty ready; big still pending
+    expect((await jobsOf(project.id)).length).toBe(3);
+
+    const res = await post(`/api/projects/${project.id}/reindex`, cookie);
+    expect(res.status).toBe(200);
+    const after = (await res.json()) as Project;
+    expect(after.repos.map((r) => r.index_state)).toEqual(["pending", "pending", "pending"]);
+    expect((await jobsOf(project.id)).length).toBe(5); // two new jobs; the pending one kept its own
+
+    const fresh = (await jobsOf(project.id)).filter((j) => j.state === "queued");
+    await deliver(...fresh.map((j) => j.id));
+    expect((await read(cookie, project.id)).repos.map((r) => r.index_state)).toEqual(["ready", "ready", "ready"]);
+  });
+
+  it("is only for the owner", async () => {
+    const { project } = await setup(["acme/shop"]);
+    const other = await setup([]);
+    expect((await post(`/api/projects/${project.id}/reindex`, other.cookie)).status).toBe(404);
+    expect((await post(`/api/projects/${project.id}/reindex`, "")).status).toBe(401);
+  });
+});
