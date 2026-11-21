@@ -1809,6 +1809,12 @@ export interface components {
             updatedAt: string;
             mergedAt: string | null;
             syncedAt: string;
+            /** @description Check runs of the head commit (a re-run replaces the earlier run of the same name). */
+            testsTotal: number;
+            /** @description Of those, completed with success, neutral or skipped. */
+            testsPassed: number;
+            /** @description Of those, completed with any other conclusion. */
+            testsFailed: number;
         };
         /** @description Size of each inbox tab, over every repo of the project. */
         PullCounts: {

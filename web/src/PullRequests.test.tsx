@@ -11,12 +11,12 @@ const USER = { id: "u1", github_id: 1, login: "octocat", name: "The Octocat", av
 const repo = (id: string, full_name: string) => ({ id, github_repo_id: null, full_name, default_branch: "main", index_state: "ready" });
 const PROJECT = { id: "p1", name: "Shop", context: "", created_at: "2026-11-21T10:00:00Z", updated_at: "2026-11-21T10:00:00Z", repos: [repo("r1", "acme/shop"), repo("r2", "acme/api")] };
 const pull = (id: string, repoName: string, number: number, title: string, o: Record<string, unknown> = {}) => ({
-  id, repo: repoName, number, title, author: "ana", state: "open", draft: false, needsYou: true, headRef: "feat", baseRef: "main",
+  id, repo: repoName, number, title, author: "ana", state: "open", draft: false, needsYou: true, testsTotal: 0, testsPassed: 0, testsFailed: 0, headRef: "feat", baseRef: "main",
   htmlUrl: "https://github.com/x", additions: 10, deletions: 2, changedFiles: 3,
   createdAt: "2026-11-21T10:00:00Z", updatedAt: "2026-11-21T10:00:00Z", mergedAt: null, syncedAt: "2026-11-21T10:00:00Z", ...o,
 });
 const ALL = [
-  pull("a", "acme/shop", 142, "Add refunds to checkout"),
+  pull("a", "acme/shop", 142, "Add refunds to checkout", { testsTotal: 4, testsPassed: 3, testsFailed: 1 }),
   pull("b", "acme/api", 7, "Retry limit for declines", { draft: true, needsYou: false }),
   pull("c", "acme/shop", 140, "Fix cart total", { state: "merged", needsYou: false, mergedAt: "2026-11-20T10:00:00Z" }),
 ];
@@ -89,6 +89,14 @@ it("lists the needs-you tab first, then switches tabs and repos through the API"
   await waitFor(() => expect(screen.queryByText("Add refunds to checkout")).toBeNull());
   expect(screen.getByText("Retry limit for declines")).toBeTruthy();
   expect(server.queries).toContain("?filter=open&repo=acme%2Fapi");
+});
+
+it("shows how many check runs passed on each row", async () => {
+  fakeServer();
+  at("/prs");
+  const row = (await screen.findByText("Add refunds to checkout")).closest("a")!;
+  expect(row.textContent).toContain("tests 3/4");
+  expect(row.querySelector(".p-bad")?.textContent).toBe("tests 3/4");
 });
 
 it("pulls from GitHub", async () => {
