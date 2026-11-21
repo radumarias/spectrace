@@ -8,6 +8,9 @@ import { Projects } from "./pages/Projects";
 import { PullRequests } from "./pages/PullRequests";
 import { RequireAuth } from "./shell/RequireAuth";
 import { Shell } from "./shell/Shell";
+import { SpecIndex, SpecPage } from "./pages/Spec";
+import { AppMap } from "./pages/AppMap";
+import { BoardIndex, BoardPage } from "./pages/Whiteboard";
 import { TITLES } from "./shell/nav";
 import { ToastProvider } from "./ui/Toast";
 
@@ -23,7 +26,12 @@ export function App() {
           <Route path="project" element={<ProjectSettings />} />
           <Route path="prs" element={<PullRequests />} />
           <Route path="pr/:pullId" element={<PullDetail />} />
-          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project", "prs"].includes(r)).map((r) => (
+          <Route path="map" element={<AppMap />} />
+          <Route path="spec" element={<SpecIndex />} />
+          <Route path="spec/:specId" element={<SpecPage />} />
+          <Route path="board" element={<BoardIndex />} />
+          <Route path="board/:boardId" element={<BoardPage />} />
+          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project", "prs", "spec", "map", "board"].includes(r)).map((r) => (
             <Route key={r} path={r} element={<Page route={r} />} />
           ))}
           <Route path="*" element={<Navigate to="/projects" replace />} />

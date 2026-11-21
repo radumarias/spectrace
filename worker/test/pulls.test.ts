@@ -66,6 +66,22 @@ const list = async (s: Seed, query = "") => {
 };
 
 describe("GET /api/projects/{id}/pulls", () => {
+  it("counts the latest check run of each name on the head commit", async () => {
+    const s = await seed();
+    const run = (rid: number, name: string, status: string, conclusion: string | null) =>
+      env.DB.prepare("INSERT INTO pr_check_runs (repo_id, github_check_run_id, head_sha, name, status, conclusion) VALUES (?1, ?2, 'sha', ?3, ?4, ?5)").bind(s.shop, rid, name, status, conclusion);
+    await env.DB.batch([
+      run(1, "build", "completed", "success"),
+      run(2, "test", "completed", "failure"),
+      run(3, "test", "completed", "success"), // re-run replaces the failure
+      run(4, "lint", "completed", "failure"),
+      run(5, "deploy", "in_progress", null),
+    ]);
+    const body = await list(s);
+    expect(body.pulls.find((p) => p.repo === "acme/shop" && p.number === 1)).toMatchObject({ testsTotal: 4, testsPassed: 2, testsFailed: 1 });
+    expect(body.pulls.find((p) => p.repo === "acme/api" && p.number === 1)).toMatchObject({ testsTotal: 0, testsPassed: 0, testsFailed: 0 });
+  });
+
   it("filter=needs: open, not draft; most recently updated first", async () => {
     const s = await seed();
     const body = await list(s, "?filter=needs");
@@ -147,6 +163,9 @@ describe("GET /api/projects/{id}/pulls", () => {
       updatedAt: "2026-11-08T00:00:00Z",
       mergedAt: "2026-11-08T00:00:00Z",
       syncedAt: expect.any(String),
+      testsTotal: 0,
+      testsPassed: 0,
+      testsFailed: 0,
     });
   });
 
@@ -193,6 +212,49 @@ describe("GET /api/projects/{id}/pulls/{pullId}", () => {
         { path: "src/b.ts", status: "renamed", previousPath: "src/a.ts", additions: 3, deletions: 3 },
       ],
     });
+  });
+
+  it("serves the diff of each file apart from the pull request", async () => {
+    const s = await seed();
+    const id = `pr-${s.shop}-1`;
+    await env.DB.prepare("INSERT INTO pr_files (pull_request_id, path, status, additions, deletions, patch) VALUES (?1, 'b.ts', 'modified', 1, 1, '@@ -1 +1 @@\n-a\n+b'), (?1, 'a.png', 'added', 0, 0, NULL)")
+      .bind(id)
+      .run();
+    const res = await call(`/api/projects/${s.projectId}/pulls/${id}/diff`, s.cookie);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ files: [{ path: "a.png", patch: null }, { path: "b.ts", patch: "@@ -1 +1 @@\n-a\n+b" }] });
+    const detail = (await (await call(`/api/projects/${s.projectId}/pulls/${id}`, s.cookie)).json()) as { files: object[] };
+    expect(JSON.stringify(detail.files)).not.toContain("patch");
+    const t = await seed();
+    expect((await call(`/api/projects/${s.projectId}/pulls/pr-${t.shop}-1/diff`, s.cookie)).status).toBe(404);
+    expect((await call(`/api/projects/${s.projectId}/pulls/${id}/diff`, null)).status).toBe(401);
+  });
+
+  it("lists the check runs of the head commit, failures first, with one run per name", async () => {
+    const s = await seed();
+    const id = `pr-${s.shop}-1`;
+    const repo = (await env.DB.prepare("SELECT repo_id FROM pull_requests WHERE id = ?1").bind(id).first<{ repo_id: string }>())!.repo_id;
+    const run = (rid: number, name: string, status: string, conclusion: string | null, sha = "sha") =>
+      env.DB.prepare("INSERT INTO pr_check_runs (repo_id, github_check_run_id, head_sha, name, status, conclusion, html_url) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'https://x/' || ?2)").bind(repo, rid, sha, name, status, conclusion);
+    await env.DB.batch([
+      run(1, "build", "completed", "success"),
+      run(2, "test", "completed", "failure"),
+      run(3, "test", "completed", "success"), // a re-run of "test" replaces the failed one
+      run(4, "deploy", "in_progress", null),
+      run(5, "lint", "completed", "failure"),
+      run(6, "old", "completed", "failure", "other-sha"),
+    ]);
+    const body = (await (await call(`/api/projects/${s.projectId}/pulls/${id}`, s.cookie)).json()) as { checks: { name: string }[]; checksState: string };
+    expect(body.checks.map((c) => c.name)).toEqual(["lint", "deploy", "build", "test"]);
+    expect(body.checksState).toBe("failing");
+    await env.DB.prepare("DELETE FROM pr_check_runs WHERE name = 'lint'").run();
+    expect(((await (await call(`/api/projects/${s.projectId}/pulls/${id}`, s.cookie)).json()) as { checksState: string }).checksState).toBe("pending");
+  });
+
+  it("says there are no checks when none are stored", async () => {
+    const s = await seed();
+    const body = (await (await call(`/api/projects/${s.projectId}/pulls/pr-${s.shop}-1`, s.cookie)).json()) as { checks: unknown[]; checksState: string };
+    expect(body).toMatchObject({ checks: [], checksState: "none" });
   });
 
   it("is 404 for an unknown PR, a PR of another project, and a stranger", async () => {

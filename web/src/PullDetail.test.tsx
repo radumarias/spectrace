@@ -13,12 +13,19 @@ const PROJECT = {
 };
 const PULL = {
   id: "pr-1", repo: "acme/shop", number: 58, title: "Checkout: show decline reason inline", author: "ana", state: "open", draft: false,
-  needsYou: true, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
+  needsYou: true, testsTotal: 0, testsPassed: 0, testsFailed: 0, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
   additions: 36, deletions: 6, changedFiles: 2, createdAt: "x", updatedAt: "x", mergedAt: null, syncedAt: "x",
-  body: "The declined screen shows why the card was declined.", headSha: "abc",
+  body: "The declined screen shows why the card was declined.", headSha: "abc", checks: [], checksState: "none",
   files: [
     { path: "src/checkout/Declined.tsx", status: "modified", previousPath: null, additions: 31, deletions: 6 },
     { path: "src/checkout/Declined.test.tsx", status: "added", previousPath: null, additions: 5, deletions: 0 },
+  ],
+};
+
+const DIFF = {
+  files: [
+    { path: "src/checkout/Declined.tsx", patch: "@@ -10,3 +10,4 @@ export function Declined() {\n   const reason = useReason();\n-  return <p>Declined</p>;\n+  return <p>Declined: {reason}</p>;\n+  // shown inline\n }" },
+    { path: "src/checkout/Declined.test.tsx", patch: null },
   ],
 };
 
@@ -35,6 +42,7 @@ function server(pull: Record<string, unknown>, status = 200, refuseMerge = false
       if (path === "/api/me") return Response.json(USER);
       if (path === "/api/projects") return Response.json([PROJECT]);
       if (path === "/api/projects/p1/pulls/pr-1") return Response.json(state, { status });
+      if (path === "/api/projects/p1/pulls/pr-1/diff") return Response.json(DIFF);
       if (path === "/api/projects/p1/pulls/pr-1/reviews" && req.method === "GET") return Response.json({ reviews });
       if (path === "/api/projects/p1/pulls/pr-1/reviews") {
         const body = (await req.json()) as { verdict: string; body?: string };
@@ -74,14 +82,38 @@ it("shows the header, the description, and the files", async () => {
   const user = userEvent.setup();
   at("/pr/pr-1");
   expect(await screen.findByRole("heading", { name: PULL.title })).toBeTruthy();
-  expect(screen.getByText("checks not synced yet")).toBeTruthy();
+  expect(screen.getByText("no checks")).toBeTruthy();
   expect(screen.getByText(PULL.body)).toBeTruthy();
 
   await user.click(screen.getByRole("tab", { name: "Files · 2" }));
-  const table = screen.getByRole("table");
-  expect(within(table).getByText("src/checkout/Declined.tsx")).toBeTruthy();
-  expect(within(table).getByText("+31")).toBeTruthy();
-  expect(within(table).getByText("added")).toBeTruthy();
+  expect(screen.getByText("src/checkout/Declined.tsx")).toBeTruthy();
+  expect(screen.getByText("+31")).toBeTruthy();
+  expect(screen.getByText("added")).toBeTruthy();
+});
+
+it("opens a file to show its diff with line numbers, and says when there is none", async () => {
+  server(PULL);
+  const user = userEvent.setup();
+  at("/pr/pr-1");
+  await user.click(await screen.findByRole("tab", { name: "Files · 2" }));
+  const changed = screen.getByRole("button", { name: /Declined\.tsx\b(?!.*test)/ });
+  expect(changed.getAttribute("aria-expanded")).toBe("false");
+  await user.click(changed);
+  const diff = await screen.findByRole("table", { name: "Changes" });
+  const rows = within(diff).getAllByRole("row");
+  expect(rows).toHaveLength(6);
+  expect(rows[0]!.className).toContain("dl-hunk");
+  expect(rows[2]!.className).toContain("dl-del");
+  expect(rows[2]!.textContent).toContain("  return <p>Declined</p>;".trim());
+  expect(rows[2]!.querySelectorAll(".dn")[0]!.textContent).toBe("11");
+  expect(rows[3]!.className).toContain("dl-add");
+  expect(rows[3]!.querySelectorAll(".dn")[1]!.textContent).toBe("11");
+  await user.click(changed);
+  expect(screen.queryByRole("table", { name: "Changes" })).toBeNull();
+
+  await user.click(screen.getByRole("button", { name: /Declined\.test\.tsx/ }));
+  expect(await screen.findByText(/No diff to show here/)).toBeTruthy();
+  expect(screen.getByRole("link", { name: "View it on GitHub" }).getAttribute("href")).toBe(`${PULL.htmlUrl}/files`);
 });
 
 it("says so when the pull request is not in the project", async () => {
@@ -128,4 +160,120 @@ it("shows why a merge was refused", async () => {
   await user.click(await screen.findByRole("button", { name: "Merge PR" }));
   expect((await screen.findByRole("alert")).textContent).toContain("head moved");
   expect((screen.getByRole("button", { name: "Merge PR" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("shows the description as markdown without HTML comments or raw HTML", async () => {
+  server({
+    ...PULL,
+    body: "<!-- fill this in -->\n## Summary\n\nAdds **bold** and [a link](https://example.com).\n\n<script>alert(1)</script>\n\n- [x] done\n",
+  });
+  const { container } = at("/pr/pr-1");
+  expect(await screen.findByRole("heading", { name: "Summary" })).toBeTruthy();
+  expect(container.querySelector("strong")?.textContent).toBe("bold");
+  expect(container.querySelector("a[href='https://example.com']")?.getAttribute("rel")).toContain("noopener");
+  expect(container.textContent).not.toContain("fill this in");
+  expect(container.querySelector("script")).toBeNull();
+});
+
+it("says there is no description when the body is only comments", async () => {
+  server({ ...PULL, body: "<!--\nTemplate help\n-->" });
+  at("/pr/pr-1");
+  expect(await screen.findByText("The author did not write a description.")).toBeTruthy();
+});
+
+it("shows the check runs and a summary of them", async () => {
+  server({
+    ...PULL,
+    checksState: "failing",
+    checks: [
+      { name: "Web (tsc, vitest)", status: "completed", conclusion: "failure", url: "https://github.com/acme/shop/actions/runs/1/job/2", startedAt: "x", completedAt: "x" },
+      { name: "E2E", status: "in_progress", conclusion: null, url: "", startedAt: "x", completedAt: null },
+      { name: "Rust", status: "completed", conclusion: "success", url: "", startedAt: "x", completedAt: "x" },
+    ],
+  });
+  at("/pr/pr-1");
+  expect(await screen.findByText("tests 1/3")).toBeTruthy();
+  const link = screen.getByRole("link", { name: "Web (tsc, vitest)" });
+  expect(link.getAttribute("href")).toContain("/actions/runs/1");
+  expect(within(link.closest("li")!).getByText("failure")).toBeTruthy();
+  expect(within(screen.getByText("E2E").closest("li")!).getByText("running")).toBeTruthy();
+  expect(within(screen.getByText("Rust").closest("li")!).getByText("passed")).toBeTruthy();
+});
+
+/** A WebSocket the test can push project events through. */
+class FakeSocket {
+  static all: FakeSocket[] = [];
+  onmessage: ((m: { data: string }) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  seq = 0;
+  constructor(public url: string) {
+    FakeSocket.all.push(this);
+  }
+  close() {}
+  push(event: string, data: Record<string, unknown> = {}) {
+    this.onmessage?.({ data: JSON.stringify({ id: ++this.seq, projectId: "p1", jobId: "wh-1", event, data, createdAt: "x" }) });
+  }
+}
+
+it("refreshes the open pull request when a webhook changes it, without a reload", async () => {
+  FakeSocket.all = [];
+  vi.stubGlobal("WebSocket", FakeSocket);
+  server(PULL);
+  // The server above answers from its own copy; swap the title there by mutating what it returns.
+  const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  const original = fetchMock.getMockImplementation() as (input: Request | string, init?: RequestInit) => Promise<Response>;
+  let title = PULL.title;
+  fetchMock.mockImplementation(async (input: Request | string, init?: RequestInit) => {
+    const res = await original(input, init);
+    const url = new URL(input instanceof Request ? input.url : input, "http://x");
+    if (url.pathname === "/api/projects/p1/pulls/pr-1") return Response.json({ ...(await res.json()), title });
+    return res;
+  });
+  at("/pr/pr-1");
+  expect(await screen.findByRole("heading", { name: PULL.title })).toBeTruthy();
+  await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+  expect(FakeSocket.all[0]!.url).toContain("/api/projects/p1/events");
+
+  title = "Checkout: show the decline reason";
+  FakeSocket.all[0]!.push("pr.updated", { repo: "acme/shop", number: 58, cause: "pull_request.edited" });
+  expect(await screen.findByRole("heading", { name: "Checkout: show the decline reason" })).toBeTruthy();
+});
+
+it("reconnects with a growing wait and catches up on what it missed", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    FakeSocket.all = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    server(PULL);
+    at("/pr/pr-1");
+    await screen.findByRole("heading", { name: PULL.title });
+    await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+    FakeSocket.all[0]!.push("pr.updated");
+    FakeSocket.all[0]!.onclose?.();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeSocket.all).toHaveLength(2);
+    expect(FakeSocket.all[1]!.url).toContain("?after=1"); // resumes after the last event seen
+    FakeSocket.all[1]!.onclose?.(); // still down: wait doubles
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(FakeSocket.all).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(FakeSocket.all).toHaveLength(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("shows the gates, the review card and the context the reviewer would use", async () => {
+  server({ ...PULL, checksState: "failing" });
+  const user = userEvent.setup();
+  at("/pr/pr-1");
+  expect(await screen.findByText("No agent review yet")).toBeTruthy();
+  expect(screen.getByText("○ Tests pass")).toBeTruthy();
+  expect(screen.getByText(/Your approval · 0\/1/)).toBeTruthy();
+  expect(screen.getByText("2 gates open")).toBeTruthy();
+  expect(screen.getByText("Edit context").getAttribute("href")).toBe("/project");
+  expect((screen.getByRole("button", { name: "Run agent review" }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(screen.getByRole("tab", { name: "Findings" }));
+  expect(screen.getByText("No agent review yet")).toBeTruthy();
 });

@@ -4,7 +4,7 @@
 // (`X-Hub-Signature-256: sha256=<hex HMAC of the raw body>`). A delivery with
 // a missing or wrong signature is refused with 401 before anything is read.
 // Handled events update the stored pull requests (`pull_request`,
-// `pull_request_review`, `check_suite`, `push`); each stored change is
+// `pull_request_review`, `check_suite`, `check_run`, `push`); each stored change is
 // announced to the project's live feed as a `pr.updated` or `repo.pushed`
 // event, and a PR whose files are out of date queues a `sync` job.
 //
@@ -14,9 +14,11 @@ import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppEnv, Bindings } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { enqueueIndex, INDEX_KIND } from "../jobs/index-repo";
 import { emit, enqueueJob } from "../jobs/queue";
 import { SYNC_KIND } from "../jobs/sync";
 import { log } from "../log";
+import { checkRunStatement, type GhCheckRun } from "../checks";
 import { upsertPullFromWebhook, type GhPull } from "../pulls";
 
 const MAX_BODY_BYTES = 26 * 1024 * 1024; // GitHub's own cap is 25 MB
@@ -29,7 +31,7 @@ const route = createRoute({
   summary: "GitHub App webhook receiver",
   description:
     "Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. " +
-    "Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.",
+    "Handles `pull_request`, `pull_request_review`, `check_suite`, `check_run` and `push`; other events are acknowledged and ignored.",
   responses: {
     200: { description: "Accepted (`handled` is false for events we do not use)", content: { "application/json": { schema: Result } } },
     400: { description: "Not a JSON payload", content: { "application/json": { schema: ErrorBody } } },
@@ -52,6 +54,7 @@ interface RepoRow {
   id: string;
   project_id: string;
   full_name: string;
+  default_branch: string;
 }
 
 /** What changed, as a live event for the project. */
@@ -66,6 +69,7 @@ interface Payload {
   pull_request?: GhPull;
   review?: { id: number; user: { login: string } | null; state: string; body: string | null; commit_id: string; submitted_at: string | null };
   check_suite?: { id: number; head_sha: string; status: string; conclusion: string | null; updated_at: string; app?: { name?: string } | null };
+  check_run?: GhCheckRun;
   ref?: string;
   before?: string;
   after?: string;
@@ -85,6 +89,19 @@ async function requestSync(env: Bindings, repo: RepoRow): Promise<void> {
   } catch (error) {
     // The PR row is already updated; a manual sync catches up. Do not make GitHub redeliver over it.
     log("warn", "webhook could not queue a sync", { repo: repo.full_name, error: String(error) }, env.LOG_FORMAT);
+  }
+}
+
+/** One waiting index job per repo is enough: it reads the branch as it is when it runs. */
+async function requestIndex(env: Bindings, repo: RepoRow): Promise<void> {
+  const waiting = await env.DB.prepare("SELECT 1 AS x FROM jobs WHERE project_id = ?1 AND kind = ?2 AND target = ?3 AND state = 'queued' LIMIT 1")
+    .bind(repo.project_id, INDEX_KIND, repo.id)
+    .first();
+  if (waiting) return;
+  try {
+    await enqueueIndex(env, repo.project_id, repo.id);
+  } catch (error) {
+    log("warn", "webhook could not queue an index", { repo: repo.full_name, error: String(error) }, env.LOG_FORMAT);
   }
 }
 
@@ -132,6 +149,17 @@ async function onCheckSuite(env: Bindings, repo: RepoRow, p: Payload): Promise<C
   return results.map((r) => prChange(repo, r.number, `check_suite.${p.action ?? "updated"}`));
 }
 
+async function onCheckRun(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[] | null> {
+  const run = p.check_run;
+  if (!run) return null;
+  const res = await checkRunStatement(env, repo.id, run).run();
+  if (res.meta.changes === 0) return [];
+  const { results } = await env.DB.prepare("SELECT number FROM pull_requests WHERE repo_id = ?1 AND head_sha = ?2 ORDER BY number")
+    .bind(repo.id, run.head_sha)
+    .all<{ number: number }>();
+  return results.map((r) => prChange(repo, r.number, `check_run.${p.action ?? "updated"}`));
+}
+
 const BRANCH = "refs/heads/";
 
 async function onPush(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[] | null> {
@@ -150,6 +178,8 @@ async function onPush(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[
     .all<{ number: number }>();
   if (results.length > 0) await requestSync(env, repo);
   for (const { number } of results) changes.push(prChange(repo, number, "push"));
+  // Specs and anchors are read from the default branch: a push there re-indexes the repo (T4.4).
+  if (branch === repo.default_branch) await requestIndex(env, repo);
   return changes;
 }
 
@@ -157,6 +187,7 @@ const HANDLERS: Record<string, (env: Bindings, repo: RepoRow, p: Payload) => Pro
   pull_request: onPullRequest,
   pull_request_review: onReview,
   check_suite: onCheckSuite,
+  check_run: onCheckRun,
   push: onPush,
 };
 
@@ -200,7 +231,7 @@ export function registerWebhook(app: OpenAPIHono<AppEnv>) {
 
     const fullName = payload.repository?.full_name;
     const { results: repos } = fullName
-      ? await c.env.DB.prepare("SELECT id, project_id, full_name FROM project_repos WHERE full_name = ?1").bind(fullName).all<RepoRow>()
+      ? await c.env.DB.prepare("SELECT id, project_id, full_name, default_branch FROM project_repos WHERE full_name = ?1").bind(fullName).all<RepoRow>()
       : { results: [] as RepoRow[] };
 
     let handled = false;

@@ -336,6 +336,18 @@
           },
           "syncedAt": {
             "type": "string"
+          },
+          "testsTotal": {
+            "type": "integer",
+            "description": "Check runs of the head commit (a re-run replaces the earlier run of the same name)."
+          },
+          "testsPassed": {
+            "type": "integer",
+            "description": "Of those, completed with success, neutral or skipped."
+          },
+          "testsFailed": {
+            "type": "integer",
+            "description": "Of those, completed with any other conclusion."
           }
         },
         "required": [
@@ -356,7 +368,10 @@
           "createdAt",
           "updatedAt",
           "mergedAt",
-          "syncedAt"
+          "syncedAt",
+          "testsTotal",
+          "testsPassed",
+          "testsFailed"
         ]
       },
       "PullCounts": {
@@ -379,6 +394,34 @@
         ],
         "description": "Size of each inbox tab, over every repo of the project."
       },
+      "PullDiff": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "patch": {
+                  "type": "string",
+                  "nullable": true,
+                  "description": "GitHub's unified diff; null for binary files and diffs that are too large."
+                }
+              },
+              "required": [
+                "path",
+                "patch"
+              ]
+            }
+          }
+        },
+        "required": [
+          "files"
+        ]
+      },
       "PullDetail": {
         "allOf": [
           {
@@ -398,12 +441,31 @@
                 "items": {
                   "$ref": "#/components/schemas/PullFile"
                 }
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CheckRun"
+                },
+                "description": "CI check runs of the head commit, failures first."
+              },
+              "checksState": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "pending",
+                  "passing",
+                  "failing"
+                ],
+                "description": "`none` when no check run is stored (not synced, or the repo has no CI)."
               }
             },
             "required": [
               "body",
               "headSha",
-              "files"
+              "files",
+              "checks",
+              "checksState"
             ]
           }
         ]
@@ -434,6 +496,46 @@
           "previousPath",
           "additions",
           "deletions"
+        ]
+      },
+      "CheckRun": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed"
+            ]
+          },
+          "conclusion": {
+            "type": "string",
+            "nullable": true,
+            "description": "GitHub's: success, failure, neutral, cancelled, skipped, timed_out, action_required, stale; null until completed."
+          },
+          "url": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "completedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "conclusion",
+          "url",
+          "startedAt",
+          "completedAt"
         ]
       },
       "PullReview": {
@@ -471,6 +573,775 @@
           "headSha",
           "githubReviewId",
           "createdAt"
+        ]
+      },
+      "SpecSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string",
+            "example": "acme/shop"
+          },
+          "path": {
+            "type": "string",
+            "example": "spec/checkout.md"
+          },
+          "root": {
+            "type": "string",
+            "description": "Folder holding the `spec` folder, '' at the top of the repo."
+          },
+          "area": {
+            "type": "string",
+            "description": "Folders between `spec/` and the file, '' when flat."
+          },
+          "flow": {
+            "type": "string",
+            "example": "checkout"
+          },
+          "title": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "requirements": {
+            "type": "integer"
+          },
+          "tested": {
+            "type": "integer",
+            "description": "Requirements with at least one test anchored to them or to their step."
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "label",
+                "to"
+              ]
+            }
+          },
+          "indexedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "repo",
+          "path",
+          "root",
+          "area",
+          "flow",
+          "title",
+          "steps",
+          "requirements",
+          "tested",
+          "errors",
+          "edges",
+          "indexedAt"
+        ]
+      },
+      "SpecDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SpecSummary"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string",
+                "nullable": true
+              },
+              "defaultBranch": {
+                "type": "string"
+              },
+              "model": {
+                "$ref": "#/components/schemas/SpecModel"
+              },
+              "diagnostics": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SpecDiagnostic"
+                }
+              },
+              "anchors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SpecAnchor"
+                }
+              },
+              "devpage": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "integer"
+                  },
+                  "url": {
+                    "type": "string",
+                    "example": "/d/6f1c2a9e-0000-4000-8000-000000000000/"
+                  }
+                },
+                "required": [
+                  "id",
+                  "version",
+                  "url"
+                ],
+                "description": "The spec as devpage server renders it, on this origin; null while devpage is off or has not published it."
+              }
+            },
+            "required": [
+              "source",
+              "sha",
+              "defaultBranch",
+              "model",
+              "diagnostics",
+              "anchors",
+              "devpage"
+            ]
+          }
+        ]
+      },
+      "SpecModel": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "flow": {
+            "type": "string"
+          },
+          "title": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "span": {
+                "$ref": "#/components/schemas/SpecSpan"
+              }
+            },
+            "required": [
+              "text",
+              "id",
+              "line",
+              "span"
+            ]
+          },
+          "diagram": {
+            "$ref": "#/components/schemas/SpecDiagram"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpecSection"
+            }
+          },
+          "head": {
+            "$ref": "#/components/schemas/SpecSpan"
+          }
+        },
+        "required": [
+          "flow",
+          "title",
+          "diagram",
+          "sections",
+          "head"
+        ],
+        "description": "Null when the file has errors; see diagnostics."
+      },
+      "SpecSpan": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "integer"
+          },
+          "end": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ]
+      },
+      "SpecDiagram": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "direction": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "LR",
+              "RL",
+              "TD",
+              "TB",
+              "BT",
+              null
+            ]
+          },
+          "line": {
+            "type": "integer"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "body": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "header": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "line": {
+                "type": "integer"
+              },
+              "span": {
+                "$ref": "#/components/schemas/SpecSpan"
+              }
+            },
+            "required": [
+              "line",
+              "span"
+            ]
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "line",
+                "span"
+              ]
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "from",
+                "label",
+                "to",
+                "line",
+                "span"
+              ]
+            }
+          },
+          "clicks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "node",
+                "target",
+                "line",
+                "span"
+              ]
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string"
+                },
+                "href": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "tooltip": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "node",
+                "href",
+                "name",
+                "tooltip",
+                "line",
+                "span"
+              ]
+            }
+          },
+          "comments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "text",
+                "line",
+                "span"
+              ]
+            }
+          }
+        },
+        "required": [
+          "direction",
+          "line",
+          "span",
+          "body",
+          "header",
+          "nodes",
+          "edges",
+          "clicks",
+          "actions",
+          "comments"
+        ]
+      },
+      "SpecSection": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "checkout.failed"
+          },
+          "node": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "heading": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpecRequirement"
+            }
+          },
+          "flow": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "end_line": {
+                "type": "integer"
+              },
+              "span": {
+                "$ref": "#/components/schemas/SpecSpan"
+              }
+            },
+            "required": [
+              "text",
+              "line",
+              "end_line",
+              "span"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "node",
+          "title",
+          "line",
+          "heading",
+          "span",
+          "requirements",
+          "flow"
+        ]
+      },
+      "SpecRequirement": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "end_line": {
+            "type": "integer"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SpecSpan"
+          }
+        },
+        "required": [
+          "tag",
+          "condition",
+          "response",
+          "line",
+          "end_line",
+          "span"
+        ]
+      },
+      "SpecDiagnostic": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "S008"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "file",
+          "line",
+          "message"
+        ]
+      },
+      "SpecAnchor": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "rust",
+              "typescript",
+              "python"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "spec",
+              "flow"
+            ]
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "code",
+              "test"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "example": "checkout.failed/r2"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "excerpt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "line",
+          "language",
+          "kind",
+          "class",
+          "target",
+          "note",
+          "excerpt"
+        ]
+      },
+      "SpecChangeOpened": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://github.com/acme/shop/pull/7"
+          },
+          "branch": {
+            "type": "string",
+            "example": "spectrace/spec-checkout-m3k2x1"
+          }
+        },
+        "required": [
+          "number",
+          "url",
+          "branch"
+        ]
+      },
+      "SpecChange": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500000,
+            "description": "The whole spec file as edited."
+          },
+          "summary": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 100,
+            "description": "One line per change, for the pull request.",
+            "example": [
+              "Renamed Declined to Payment declined"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "summary"
+        ]
+      },
+      "NewSpec": {
+        "type": "object",
+        "properties": {
+          "repoId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^(?:[A-Za-z0-9_.-]+\\/)*spec\\/(?:[a-z][a-z0-9_]*\\/)*[a-z][a-z0-9_]{0,39}\\.md$",
+            "example": "spec/sign_up.md",
+            "description": "Under a `spec/` folder; the file name is the flow id."
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500000
+          },
+          "summary": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "repoId",
+          "path",
+          "source",
+          "summary"
+        ]
+      },
+      "BoardSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "blocks",
+          "updatedAt"
+        ]
+      },
+      "Board": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BoardBlock"
+            }
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "blocks",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "BoardBlock": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{1,40}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "note",
+              "mermaid"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 50000
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "text"
+        ]
+      },
+      "BoardInput": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BoardBlock"
+            },
+            "maxItems": 100
+          }
+        },
+        "required": [
+          "title",
+          "blocks"
         ]
       }
     },
@@ -542,6 +1413,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "GitHub sign-in is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }
@@ -572,6 +1453,14 @@
             },
             "required": false,
             "name": "error",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "setup_action",
             "in": "query"
           }
         ],
@@ -666,7 +1555,7 @@
               }
             }
           },
-          "500": {
+          "503": {
             "description": "App not configured",
             "content": {
               "application/json": {
@@ -797,7 +1686,7 @@
     "/api/github/webhook": {
       "post": {
         "summary": "GitHub App webhook receiver",
-        "description": "Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.",
+        "description": "Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite`, `check_run` and `push`; other events are acknowledged and ignored.",
         "responses": {
           "200": {
             "description": "Accepted (`handled` is false for events we do not use)",
@@ -1800,6 +2689,64 @@
         }
       }
     },
+    "/api/projects/{projectId}/pulls/{pullId}/diff": {
+      "get": {
+        "summary": "The unified diff of each changed file",
+        "description": "Kept apart from the pull request so the page loads without it. Files are in the same order as `files` on the pull request.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "pullId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Diffs by file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullDiff"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{projectId}/pulls/{pullId}": {
       "get": {
         "summary": "One pull request: header, description and changed files",
@@ -2135,6 +3082,576 @@
           },
           "502": {
             "description": "GitHub could not be reached or refused the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/specs": {
+      "get": {
+        "summary": "Specs of a project's repos, by repo and path",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Specs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpecSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/specs/{specId}": {
+      "get": {
+        "summary": "One spec: source, parsed model, diagnostics and the code and tests anchored to it",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/specs/{specId}/changes": {
+      "post": {
+        "summary": "Save an edited spec: commit it on a new branch and open a pull request",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpecChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecChangeOpened"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nothing changed, or the edited spec has errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec changed on GitHub since it was indexed, or GitHub refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/specs/new": {
+      "post": {
+        "summary": "Add a new spec file (a whiteboard draft): commit it on a new branch and open a pull request",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSpec"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecChangeOpened"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The spec has errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The file already exists, or GitHub refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/boards": {
+      "get": {
+        "summary": "The project's whiteboards, most recently changed first",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Boards",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BoardSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Start a whiteboard",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoardInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Board"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/boards/{boardId}": {
+      "get": {
+        "summary": "One whiteboard with its blocks",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "boardId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Board"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace a whiteboard's title and blocks",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "boardId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BoardInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Board"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a whiteboard",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "boardId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or board",
             "content": {
               "application/json": {
                 "schema": {

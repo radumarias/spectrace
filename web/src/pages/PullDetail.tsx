@@ -1,9 +1,51 @@
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
-import { useMergePull, usePull, usePullReviews, useReviewPull, type PullDetail as Pull } from "../api/pulls";
+import { useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, type PullDetail as Pull } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
+import { Diff } from "../ui/Diff";
+import { Markdown, stripHtmlComments } from "../ui/Markdown";
 import { useToast } from "../ui/Toast";
+
+const CHECKS: Record<Pull["checksState"], { tone: PillTone; label: string }> = {
+  none: { tone: "idle", label: "no checks" },
+  pending: { tone: "warn", label: "checks running" },
+  passing: { tone: "ok", label: "checks passing" },
+  failing: { tone: "bad", label: "checks failing" },
+};
+
+/** "tests 3/4": check runs that finished well, over all of them (the prototype's wording). */
+function testsLabel(p: Pull): string {
+  if (p.checks.length === 0) return CHECKS.none.label;
+  const ok = p.checks.filter((c) => c.status === "completed" && ["success", "neutral", "skipped"].includes(c.conclusion ?? "")).length;
+  return `tests ${ok}/${p.checks.length}`;
+}
+
+type Gate = { label: string; ok: boolean; checked: boolean };
+
+/**
+ * The merge gates of the prototype. Tests and approval are known today; the
+ * review gates (agent review, findings, spec mapping) wait for those features
+ * and show as "not checked yet" without holding the merge back.
+ */
+function gatesOf(p: Pull, approved: boolean): Gate[] {
+  return [
+    { label: "Agent review finished", ok: false, checked: false },
+    { label: "No open high or medium findings", ok: false, checked: false },
+    { label: "Every changed file mapped to a spec", ok: false, checked: false },
+    { label: "Tests pass", ok: p.checksState === "passing" || p.checksState === "none", checked: true },
+    { label: `Your approval · ${approved ? 1 : 0}/1`, ok: approved, checked: true },
+  ];
+}
+
+function checkLine(c: Pull["checks"][number]): { tone: PillTone; label: string } {
+  if (c.status === "queued") return { tone: "idle", label: "queued" };
+  if (c.status === "in_progress") return { tone: "warn", label: "running" };
+  const k = c.conclusion ?? "";
+  if (k === "success") return { tone: "ok", label: "passed" };
+  if (k === "neutral" || k === "skipped") return { tone: "idle", label: k };
+  return { tone: "bad", label: k.replace(/_/g, " ") || "failed" };
+}
 
 const STATE: Record<Pull["state"], { tone: PillTone; label: string }> = {
   open: { tone: "acc", label: "open" },
@@ -32,6 +74,7 @@ export function PullDetail() {
   const { pullId } = useParams();
   const { project, isPending } = useCurrentProject();
   const pull = usePull(project?.id, pullId);
+  const reviews = usePullReviews(project?.id, pullId);
   const [tab, setTab] = useState("walk");
 
   if (isPending || (project && pull.isPending)) return null;
@@ -41,6 +84,9 @@ export function PullDetail() {
 
   const p = pull.data;
   const s = STATE[p.state];
+  const mine = reviews.data?.[0];
+  const approved = mine?.headSha === p.headSha && mine.verdict === "approved";
+  const gates = gatesOf(p, approved);
   return (
     <div className="page">
       <div className="head">
@@ -53,37 +99,87 @@ export function PullDetail() {
           <div className="btns" style={{ gap: 6 }}>
             <Pill tone={s.tone}>{s.label}</Pill>
             {p.draft && <Pill tone="idle">draft</Pill>}
-            <Pill tone="idle">checks not synced yet</Pill>
+            <Pill tone={CHECKS[p.checksState].tone}>{testsLabel(p)}</Pill>
+            <Pill tone="idle">not reviewed</Pill>
             <Pill tone="idle">{p.changedFiles} {p.changedFiles === 1 ? "file" : "files"} changed</Pill>
           </div>
         </div>
-        <Actions projectId={project.id} pull={p} />
+        <Actions projectId={project.id} pull={p} gates={gates} />
       </div>
 
       <Tabs
-        items={[{ id: "walk", label: "Walkthrough" }, { id: "files", label: `Files · ${p.files.length}` }]}
+        items={[{ id: "walk", label: "Walkthrough" }, { id: "files", label: `Files · ${p.files.length}` }, { id: "findings", label: "Findings" }]}
         value={tab}
         onChange={setTab}
       />
 
-      {tab === "walk" ? <Walkthrough pull={p} /> : <Files pull={p} />}
+      {tab === "walk" && <Walkthrough pull={p} gates={gates} context={project.context} />}
+      {tab === "files" && <Files projectId={project.id} pull={p} />}
+      {tab === "findings" && <ReviewCard />}
     </div>
   );
 }
 
-function Walkthrough({ pull: p }: { pull: Pull }) {
+/** The prototype's card for a PR nobody has reviewed. The review job itself is T3.4; the button stays off until it exists. */
+function ReviewCard() {
+  return (
+    <Card className="stack" >
+      <b style={{ font: "600 16px var(--f-display)" }}>No agent review yet</b>
+      <p className="sub" style={{ fontSize: 13 }}>
+        The reviewer reads the diff against the specs it touches, writes a walkthrough and lists findings. Refuters double-check each finding first, so you only see real ones.
+      </p>
+      <div className="btns">
+        <Button variant="primary" disabled title="Agent review is not available yet">Run agent review</Button>
+        <span className="sub" style={{ fontSize: 12 }}>Not available yet</span>
+      </div>
+    </Card>
+  );
+}
+
+function Walkthrough({ pull: p, gates, context }: { pull: Pull; gates: Gate[]; context: string }) {
   return (
     <div className="row">
       <div className="main stack">
+        <ReviewCard />
         <Card className="stack">
           <span className="lbl">What this PR does</span>
-          <p className="pr-body">{p.body.trim() || "The author did not write a description."}</p>
+          {stripHtmlComments(p.body).trim() ? <Markdown>{p.body}</Markdown> : <p className="sub">The author did not write a description.</p>}
         </Card>
       </div>
       <div className="aside stack">
         <Card className="stack">
+          <span className="lbl">Gates</span>
+          <div className="box">
+            {gates.map((g) => (
+              <span key={g.label} style={{ color: g.ok ? "var(--ok)" : "var(--fg)" }}>
+                {g.ok ? "✓" : "○"} {g.label}
+                {!g.checked && <span className="sub"> (not checked yet)</span>}
+              </span>
+            ))}
+          </div>
+        </Card>
+        <Card className="stack">
+          <span className="lbl">Project context the reviewer used</span>
+          <p className="sub clamp" style={{ fontSize: 12.5 }}>{context.trim() || "No context yet."}</p>
+          <Link to="/project" style={{ fontSize: 12.5 }}>Edit context</Link>
+        </Card>
+        <Card className="stack">
           <span className="lbl">Checks</span>
-          <p className="sub" style={{ fontSize: 13 }}>CI results show up here once they are synced from GitHub.</p>
+          {p.checks.length === 0 ? (
+            <p className="sub" style={{ fontSize: 13 }}>No check runs for this commit yet. Pull from GitHub on the pull requests page to read them.</p>
+          ) : (
+            <ul className="checks">
+              {p.checks.map((c) => {
+                const line = checkLine(c);
+                return (
+                  <li key={c.name}>
+                    {c.url ? <a href={c.url} target="_blank" rel="noreferrer">{c.name}</a> : <span>{c.name}</span>}
+                    <Pill tone={line.tone}>{line.label}</Pill>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Card>
         <Card className="stack">
           <span className="lbl">Size</span>
@@ -98,34 +194,58 @@ function Walkthrough({ pull: p }: { pull: Pull }) {
   );
 }
 
-function Files({ pull: p }: { pull: Pull }) {
+function Files({ projectId, pull: p }: { projectId: string; pull: Pull }) {
+  const diffs = usePullDiff(projectId, p.id, true);
+  const [open, setOpen] = useState<Set<string>>(new Set());
   if (p.files.length === 0) return <Card><p className="sub">No changed files are stored for this pull request yet.</p></Card>;
+  const toggle = (path: string) =>
+    setOpen((o) => {
+      const next = new Set(o);
+      if (!next.delete(path)) next.add(path);
+      return next;
+    });
   return (
-    <div className="card tbl-wrap">
-      <table className="tbl" style={{ minWidth: 420 }}>
-        <thead>
-          <tr><th>File</th><th>Status</th><th className="num">Change</th></tr>
-        </thead>
-        <tbody>
-          {p.files.map((f) => (
-            <tr key={f.path}>
-              <td>
-                <code style={{ overflowWrap: "anywhere" }}>{f.path}</code>
-                {f.previousPath && <div className="mono sub" style={{ fontSize: 11 }}>from {f.previousPath}</div>}
-              </td>
-              <td><Pill tone={f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "idle"}>{f.status}</Pill></td>
-              <td className="num mono" style={{ fontSize: 12 }}>
+    <div className="stack">
+      {diffs.error && <p className="err" role="alert">{diffs.error.message}</p>}
+      {p.files.map((f) => {
+        const expanded = open.has(f.path);
+        const patch = diffs.data?.get(f.path);
+        const id = `diff-${f.path}`;
+        return (
+          <div className="card file" key={f.path}>
+            <button className="file-head" type="button" aria-expanded={expanded} aria-controls={id} onClick={() => toggle(f.path)}>
+              <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+              <span className="file-name">
+                <code>{f.path}</code>
+                {f.previousPath && <span className="mono sub" style={{ fontSize: 11 }}>from {f.previousPath}</span>}
+              </span>
+              <Pill tone={f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "idle"}>{f.status}</Pill>
+              <span className="mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
                 <span style={{ color: "var(--ok)" }}>+{f.additions}</span> <span style={{ color: "var(--bad)" }}>−{f.deletions}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+              </span>
+            </button>
+            {expanded && (
+              <div id={id} className="file-body">
+                {diffs.isPending ? (
+                  <p className="sub pad">Loading the changes…</p>
+                ) : patch ? (
+                  <Diff patch={patch} />
+                ) : (
+                  <p className="sub pad">
+                    No diff to show here: the file is binary, empty, or too large.{" "}
+                    <a href={`${p.htmlUrl}/files`} target="_blank" rel="noreferrer">View it on GitHub</a>
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function Actions({ projectId, pull: p }: { projectId: string; pull: Pull }) {
+function Actions({ projectId, pull: p, gates }: { projectId: string; pull: Pull; gates: Gate[] }) {
   const toast = useToast();
   const reviews = usePullReviews(projectId, p.id);
   const review = useReviewPull(projectId, p.id);
@@ -139,6 +259,7 @@ function Actions({ projectId, pull: p }: { projectId: string; pull: Pull }) {
   const current = mine && mine.headSha === p.headSha ? mine.verdict : null;
   const open = p.state === "open";
   const busy = review.isPending || merge.isPending;
+  const openGates = gates.filter((g) => g.checked && !g.ok).length;
 
   const send = (verdict: "approve" | "request_changes", body?: string) => {
     setError("");
@@ -176,7 +297,7 @@ function Actions({ projectId, pull: p }: { projectId: string; pull: Pull }) {
       </div>
       <span className="sub" style={{ fontSize: 12, textAlign: "right", maxWidth: 340 }}>
         {p.state === "merged"
-          ? "Merged"
+          ? "Merged just now"
           : p.state === "closed"
             ? "Closed without merging"
             : p.draft
@@ -185,7 +306,9 @@ function Actions({ projectId, pull: p }: { projectId: string; pull: Pull }) {
                 ? "You asked for changes on this commit"
                 : current === "approved"
                   ? "You approved this commit"
-                  : "Waiting on your review"}
+                  : openGates === 0
+                    ? "All gates passed"
+                    : `${openGates} ${openGates === 1 ? "gate" : "gates"} open`}
       </span>
       {error && <span className="err" role="alert" style={{ textAlign: "right", maxWidth: 340 }}>{error}</span>}
       {asking && open && (

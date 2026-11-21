@@ -88,6 +88,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description GitHub sign-in is not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
             };
         };
         put?: never;
@@ -112,6 +121,7 @@ export interface paths {
                     code?: string;
                     state?: string;
                     error?: string;
+                    setup_action?: string;
                 };
                 header?: never;
                 path?: never;
@@ -276,7 +286,7 @@ export interface paths {
                     };
                 };
                 /** @description App not configured */
-                500: {
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -425,7 +435,7 @@ export interface paths {
         put?: never;
         /**
          * GitHub App webhook receiver
-         * @description Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite` and `push`; other events are acknowledged and ignored.
+         * @description Called by GitHub, not by the web app. Needs `X-Hub-Signature-256`, `X-GitHub-Event` and `X-GitHub-Delivery`. Handles `pull_request`, `pull_request_review`, `check_suite`, `check_run` and `push`; other events are acknowledged and ignored.
          */
         post: {
             parameters: {
@@ -1355,6 +1365,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/pulls/{pullId}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The unified diff of each changed file
+         * @description Kept apart from the pull request so the page loads without it. Files are in the same order as `files` on the pull request.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    pullId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Diffs by file */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PullDiff"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{projectId}/pulls/{pullId}": {
         parameters: {
             query?: never;
@@ -1647,6 +1717,535 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/specs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Specs of a project's repos, by repo and path */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Specs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpecSummary"][];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/specs/{specId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One spec: source, parsed model, diagnostics and the code and tests anchored to it */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    specId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The spec */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpecDetail"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or spec */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/specs/{specId}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save an edited spec: commit it on a new branch and open a pull request */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    specId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SpecChange"];
+                };
+            };
+            responses: {
+                /** @description The pull request */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpecChangeOpened"];
+                    };
+                };
+                /** @description Nothing changed, or the edited spec has errors */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or spec */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The spec changed on GitHub since it was indexed, or GitHub refused */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/specs/new": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a new spec file (a whiteboard draft): commit it on a new branch and open a pull request */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NewSpec"];
+                };
+            };
+            responses: {
+                /** @description The pull request */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpecChangeOpened"];
+                    };
+                };
+                /** @description The spec has errors */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or repo */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The file already exists, or GitHub refused */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/boards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's whiteboards, most recently changed first */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Boards */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BoardSummary"][];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Start a whiteboard */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BoardInput"];
+                };
+            };
+            responses: {
+                /** @description The board */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Board"];
+                    };
+                };
+                /** @description Bad board */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/boards/{boardId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One whiteboard with its blocks */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    boardId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The board */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Board"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or board */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /** Replace a whiteboard's title and blocks */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    boardId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BoardInput"];
+                };
+            };
+            responses: {
+                /** @description The board */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Board"];
+                    };
+                };
+                /** @description Bad board */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or board */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Delete a whiteboard */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    boardId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or board */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1739,6 +2338,12 @@ export interface components {
             updatedAt: string;
             mergedAt: string | null;
             syncedAt: string;
+            /** @description Check runs of the head commit (a re-run replaces the earlier run of the same name). */
+            testsTotal: number;
+            /** @description Of those, completed with success, neutral or skipped. */
+            testsPassed: number;
+            /** @description Of those, completed with any other conclusion. */
+            testsFailed: number;
         };
         /** @description Size of each inbox tab, over every repo of the project. */
         PullCounts: {
@@ -1746,10 +2351,24 @@ export interface components {
             open: number;
             merged: number;
         };
+        PullDiff: {
+            files: {
+                path: string;
+                /** @description GitHub's unified diff; null for binary files and diffs that are too large. */
+                patch: string | null;
+            }[];
+        };
         PullDetail: components["schemas"]["Pull"] & {
             body: string;
             headSha: string;
             files: components["schemas"]["PullFile"][];
+            /** @description CI check runs of the head commit, failures first. */
+            checks: components["schemas"]["CheckRun"][];
+            /**
+             * @description `none` when no check run is stored (not synced, or the repo has no CI).
+             * @enum {string}
+             */
+            checksState: "none" | "pending" | "passing" | "failing";
         };
         PullFile: {
             path: string;
@@ -1757,6 +2376,16 @@ export interface components {
             previousPath: string | null;
             additions: number;
             deletions: number;
+        };
+        CheckRun: {
+            name: string;
+            /** @enum {string} */
+            status: "queued" | "in_progress" | "completed";
+            /** @description GitHub's: success, failure, neutral, cancelled, skipped, timed_out, action_required, stale; null until completed. */
+            conclusion: string | null;
+            url: string;
+            startedAt: string | null;
+            completedAt: string | null;
         };
         PullReview: {
             id: number;
@@ -1767,6 +2396,202 @@ export interface components {
             headSha: string;
             githubReviewId: number | null;
             createdAt: string;
+        };
+        SpecSummary: {
+            id: string;
+            /** @example acme/shop */
+            repo: string;
+            /** @example spec/checkout.md */
+            path: string;
+            /** @description Folder holding the `spec` folder, '' at the top of the repo. */
+            root: string;
+            /** @description Folders between `spec/` and the file, '' when flat. */
+            area: string;
+            /** @example checkout */
+            flow: string;
+            title: string;
+            steps: number;
+            requirements: number;
+            /** @description Requirements with at least one test anchored to them or to their step. */
+            tested: number;
+            errors: number;
+            edges: {
+                from: string;
+                label: string;
+                to: string;
+            }[];
+            indexedAt: string;
+        };
+        SpecDetail: components["schemas"]["SpecSummary"] & {
+            source: string;
+            sha: string | null;
+            defaultBranch: string;
+            model: components["schemas"]["SpecModel"];
+            diagnostics: components["schemas"]["SpecDiagnostic"][];
+            anchors: components["schemas"]["SpecAnchor"][];
+            /** @description The spec as devpage server renders it, on this origin; null while devpage is off or has not published it. */
+            devpage: {
+                id: string;
+                version: number;
+                /** @example /d/6f1c2a9e-0000-4000-8000-000000000000/ */
+                url: string;
+            } | null;
+        };
+        /** @description Null when the file has errors; see diagnostics. */
+        SpecModel: {
+            flow: string;
+            title: {
+                text: string;
+                id: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            } | null;
+            diagram: components["schemas"]["SpecDiagram"];
+            sections: components["schemas"]["SpecSection"][];
+            head: components["schemas"]["SpecSpan"];
+        } | null;
+        SpecSpan: {
+            start: number;
+            end: number;
+        };
+        SpecDiagram: {
+            /** @enum {string|null} */
+            direction: "LR" | "RL" | "TD" | "TB" | "BT" | null;
+            line: number;
+            span: components["schemas"]["SpecSpan"];
+            body: components["schemas"]["SpecSpan"];
+            header: {
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            } | null;
+            nodes: {
+                id: string;
+                label: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+            edges: {
+                from: string;
+                label: string;
+                to: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+            clicks: {
+                node: string;
+                target: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+            actions: {
+                node: string;
+                href: string;
+                name: string;
+                tooltip: string | null;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+            comments: {
+                text: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+        } | null;
+        SpecSection: {
+            /** @example checkout.failed */
+            id: string;
+            node: string;
+            title: string;
+            line: number;
+            heading: components["schemas"]["SpecSpan"];
+            span: components["schemas"]["SpecSpan"];
+            requirements: components["schemas"]["SpecRequirement"][];
+            flow: {
+                text: string;
+                line: number;
+                end_line: number;
+                span: components["schemas"]["SpecSpan"];
+            } | null;
+        };
+        SpecRequirement: {
+            tag: string;
+            condition: string;
+            response: string;
+            line: number;
+            end_line: number;
+            span: components["schemas"]["SpecSpan"];
+        };
+        SpecDiagnostic: {
+            /** @example S008 */
+            code: string;
+            file: string;
+            line: number;
+            message: string;
+        };
+        SpecAnchor: {
+            path: string;
+            line: number;
+            /** @enum {string} */
+            language: "rust" | "typescript" | "python";
+            /** @enum {string} */
+            kind: "spec" | "flow";
+            /** @enum {string} */
+            class: "code" | "test";
+            /** @example checkout.failed/r2 */
+            target: string;
+            note: string | null;
+            excerpt: string;
+        };
+        SpecChangeOpened: {
+            number: number;
+            /** @example https://github.com/acme/shop/pull/7 */
+            url: string;
+            /** @example spectrace/spec-checkout-m3k2x1 */
+            branch: string;
+        };
+        SpecChange: {
+            /** @description The whole spec file as edited. */
+            source: string;
+            /**
+             * @description One line per change, for the pull request.
+             * @example [
+             *       "Renamed Declined to Payment declined"
+             *     ]
+             */
+            summary: string[];
+        };
+        NewSpec: {
+            repoId: string;
+            /**
+             * @description Under a `spec/` folder; the file name is the flow id.
+             * @example spec/sign_up.md
+             */
+            path: string;
+            source: string;
+            summary: string[];
+        };
+        BoardSummary: {
+            id: string;
+            title: string;
+            blocks: number;
+            updatedAt: string;
+        };
+        Board: {
+            id: string;
+            title: string;
+            blocks: components["schemas"]["BoardBlock"][];
+            createdAt: string;
+            updatedAt: string;
+        };
+        BoardBlock: {
+            id: string;
+            /** @enum {string} */
+            kind: "note" | "mermaid";
+            text: string;
+        };
+        BoardInput: {
+            title: string;
+            blocks: components["schemas"]["BoardBlock"][];
         };
     };
     responses: never;

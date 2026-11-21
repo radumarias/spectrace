@@ -5,6 +5,7 @@ import type { AppEnv, Bindings } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
 import { appConfigFromEnv, ghHeaders, installationToken } from "../github-app";
+import { checkRunsOf, checksState } from "../checks";
 import { enqueueJob, type JobRow } from "../jobs/queue";
 import { installationFor, SYNC_KIND } from "../jobs/sync";
 import { Job, toJob } from "./jobs";
@@ -33,6 +34,9 @@ const Pull = z
     updatedAt: z.string(),
     mergedAt: z.string().nullable(),
     syncedAt: z.string(),
+    testsTotal: z.number().int().openapi({ description: "Check runs of the head commit (a re-run replaces the earlier run of the same name)." }),
+    testsPassed: z.number().int().openapi({ description: "Of those, completed with success, neutral or skipped." }),
+    testsFailed: z.number().int().openapi({ description: "Of those, completed with any other conclusion." }),
   })
   .openapi("Pull");
 
@@ -46,7 +50,30 @@ const PullFile = z
   })
   .openapi("PullFile");
 
-const PullDetail = Pull.extend({ body: z.string(), headSha: z.string(), files: z.array(PullFile) }).openapi("PullDetail");
+const CheckRun = z
+  .object({
+    name: z.string(),
+    status: z.enum(["queued", "in_progress", "completed"]),
+    conclusion: z.string().nullable().openapi({ description: "GitHub's: success, failure, neutral, cancelled, skipped, timed_out, action_required, stale; null until completed." }),
+    url: z.string(),
+    startedAt: z.string().nullable(),
+    completedAt: z.string().nullable(),
+  })
+  .openapi("CheckRun");
+
+const PullDetail = Pull.extend({
+  body: z.string(),
+  headSha: z.string(),
+  files: z.array(PullFile),
+  checks: z.array(CheckRun).openapi({ description: "CI check runs of the head commit, failures first." }),
+  checksState: z.enum(["none", "pending", "passing", "failing"]).openapi({ description: "`none` when no check run is stored (not synced, or the repo has no CI)." }),
+}).openapi("PullDetail");
+
+const PullDiff = z
+  .object({
+    files: z.array(z.object({ path: z.string(), patch: z.string().nullable().openapi({ description: "GitHub's unified diff; null for binary files and diffs that are too large." }) })),
+  })
+  .openapi("PullDiff");
 
 const Counts = z
   .object({ needs: z.number().int(), open: z.number().int(), merged: z.number().int() })
@@ -71,6 +98,7 @@ const where = (filter: "needs" | "open" | "merged" | "all", user: number) => ({ 
 
 interface PullRow {
   id: string;
+  repo_id: string;
   repo: string;
   number: number;
   title: string;
@@ -90,9 +118,20 @@ interface PullRow {
   merged_at: string | null;
   synced_at: string;
   needs: number;
+  tests_total: number;
+  tests_passed: number;
+  tests_failed: number;
 }
 
-const select = (user: number) => `SELECT p.*, r.full_name AS repo, ${needs(user)} AS needs
+// The latest run of each check name on the head commit; `extra` narrows which of them are counted.
+const runs = (extra: string) =>
+  `(SELECT COUNT(*) FROM pr_check_runs c WHERE c.repo_id = p.repo_id AND c.head_sha = p.head_sha ${extra}
+      AND c.github_check_run_id = (SELECT MAX(x.github_check_run_id) FROM pr_check_runs x WHERE x.repo_id = c.repo_id AND x.head_sha = c.head_sha AND x.name = c.name))`;
+const PASSED = "AND c.status = 'completed' AND c.conclusion IN ('success', 'neutral', 'skipped')";
+const FAILED = "AND c.status = 'completed' AND COALESCE(c.conclusion, '') NOT IN ('success', 'neutral', 'skipped')";
+
+const select = (user: number) => `SELECT p.*, r.full_name AS repo, ${needs(user)} AS needs,
+  ${runs("")} AS tests_total, ${runs(PASSED)} AS tests_passed, ${runs(FAILED)} AS tests_failed
   FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id`;
 
 function toPull(r: PullRow): z.infer<typeof Pull> {
@@ -115,6 +154,9 @@ function toPull(r: PullRow): z.infer<typeof Pull> {
     updatedAt: r.github_updated_at,
     mergedAt: r.merged_at,
     syncedAt: r.synced_at,
+    testsTotal: r.tests_total,
+    testsPassed: r.tests_passed,
+    testsFailed: r.tests_failed,
   };
 }
 
@@ -148,6 +190,15 @@ const get = createRoute({
   summary: "One pull request: header, description and changed files",
   request: { params: z.object({ projectId: ProjectParam, pullId: PullParam }) },
   responses: { 200: { description: "The pull request", content: { "application/json": { schema: PullDetail } } }, 401: errors[401], 404: errors[404] },
+});
+
+const diff = createRoute({
+  method: "get",
+  path: "/api/projects/{projectId}/pulls/{pullId}/diff",
+  summary: "The unified diff of each changed file",
+  description: "Kept apart from the pull request so the page loads without it. Files are in the same order as `files` on the pull request.",
+  request: { params: z.object({ projectId: ProjectParam, pullId: PullParam }) },
+  responses: { 200: { description: "Diffs by file", content: { "application/json": { schema: PullDiff } } }, 401: errors[401], 404: errors[404] },
 });
 
 const pull = createRoute({
@@ -253,7 +304,7 @@ async function writablePull(c: Context<AppEnv>, projectId: string, pullId: strin
 }
 
 /** A call to GitHub as the App installed on the repo's owner. Returns the status and body; 5xx and network errors throw. */
-async function github(env: Bindings, projectId: string, fullName: string, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+export async function github(env: Bindings, projectId: string, fullName: string, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
   const installationId = await installationFor(env, projectId, fullName);
   if (installationId === null) throw new AppError("conflict", `conflict: no GitHub App installation for ${fullName}; install the app on its owner first`);
   const app = appConfigFromEnv(env);
@@ -382,6 +433,15 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
     return c.json({ pulls: (rows!.results as unknown as PullRow[]).map(toPull), counts: counts!.results[0] as z.infer<typeof Counts> }, 200);
   });
 
+  app.openapi(diff, async (c) => {
+    const { projectId, pullId } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
+    const found = await c.env.DB.prepare("SELECT 1 AS x FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id WHERE r.project_id = ?1 AND p.id = ?2").bind(projectId, pullId).first();
+    if (!found) throw AppError.notFound(`pull request ${pullId}`);
+    const { results } = await c.env.DB.prepare("SELECT path, patch FROM pr_files WHERE pull_request_id = ?1 ORDER BY path").bind(pullId).all<{ path: string; patch: string | null }>();
+    return c.json({ files: results }, 200);
+  });
+
   app.openapi(get, async (c) => {
     const { projectId, pullId } = c.req.valid("param");
     const user = await requireUser(c);
@@ -392,6 +452,7 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
       .bind(pullId)
       .all<{ path: string; status: string; previous_path: string | null; additions: number; deletions: number }>();
     const files = results.map((f) => ({ path: f.path, status: f.status, previousPath: f.previous_path, additions: f.additions, deletions: f.deletions }));
-    return c.json({ ...toPull(row), body: row.body, headSha: row.head_sha, files }, 200);
+    const checks = await checkRunsOf(c.env, row.repo_id, row.head_sha);
+    return c.json({ ...toPull(row), body: row.body, headSha: row.head_sha, files, checks, checksState: checksState(checks) }, 200);
   });
 }

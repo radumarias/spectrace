@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { getCurrentProjectId } from "../api/current";
-import { IndexLive } from "../api/live";
+import { IndexLive, ProjectLive } from "../api/live";
+import { usePulls } from "../api/pulls";
 import { useMe, useProjects, useSignOut } from "../api/queries";
 import { useTheme } from "../theme";
 import { Button } from "../ui/parts";
 import { Icon } from "../ui/Icon";
 import { GROUPS, ROOT_ROUTES, TABS } from "./nav";
 
-const BADGES: Record<string, number> = { home: 4, prs: 3, agents: 2 };
-
-function Badge({ id }: { id: string }) {
-  return BADGES[id] ? <span className="bd">{BADGES[id]}</span> : null;
+/** Badge counts come from the API; pages without data of their own get none. */
+function Badge({ id, needs }: { id: string; needs: number }) {
+  return (id === "home" || id === "prs") && needs > 0 ? <span className="bd">{needs}</span> : null;
 }
 
 export function Shell() {
@@ -25,6 +25,7 @@ export function Shell() {
   const signOut = useSignOut();
   const projects = useProjects().data;
   const current = projects?.find((p) => p.id === getCurrentProjectId()) ?? projects?.[0];
+  const needs = usePulls(current?.id, "needs", null).data?.counts.needs ?? 0;
   const repoWord = (n: number) => `${n} ${n === 1 ? "repo" : "repos"}`;
 
   useEffect(() => {
@@ -48,12 +49,6 @@ export function Shell() {
           {root || !current ? "All projects" : `${current.name} · ${repoWord(current.repos.length)}`}
         </NavLink>
         <span className="grow" />
-        <div className="usage" title="Claude plan usage, 5-hour window">
-          <span className="mono">plan 38%</span>
-          <div className="bar" style={{ width: 90 }}>
-            <i className="b-acc" style={{ width: "38%" }} />
-          </div>
-        </div>
         <Button small onClick={toggle} aria-label="Switch light or dark theme">
           {theme === "dark" ? "Light" : "Dark"}
         </Button>
@@ -93,20 +88,16 @@ export function Shell() {
                 <NavLink key={it.id} to={`/${it.id}`} className={({ isActive }) => (isActive || (it.id === "prs" && route === "pr") ? "on" : "")}>
                   <Icon name={it.id} />
                   <span>{it.label}</span>
-                  <Badge id={it.id} />
+                  <Badge id={it.id} needs={needs} />
                 </NavLink>
               ))}
             </div>
           ))}
-          <div className="live">
-            <span className="lbl">Live</span>
-            <span>2 agents working on checkout</span>
-            <span>$0 API · runs on your plan</span>
-          </div>
         </nav>
       )}
 
-      {projects?.map((p) => <IndexLive key={p.id} project={p} />)}
+      {current && <ProjectLive key={current.id} project={current} />}
+      {projects?.filter((p) => p.id !== current?.id).map((p) => <IndexLive key={p.id} project={p} />)}
 
       <main ref={main} tabIndex={-1}>
         <Outlet />
@@ -140,7 +131,7 @@ export function Shell() {
             >
               <Icon name={t.id} size={22} />
               {t.label}
-              <Badge id={t.id} />
+              <Badge id={t.id} needs={needs} />
             </NavLink>
           ))}
         </nav>

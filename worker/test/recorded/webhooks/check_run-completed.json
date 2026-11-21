@@ -1,0 +1,14 @@
+{
+  "action": "completed",
+  "check_run": {
+    "id": 9001,
+    "head_sha": "ccc333",
+    "name": "Web (tsc, vitest)",
+    "status": "completed",
+    "conclusion": "failure",
+    "html_url": "https://github.com/acme/shop/actions/runs/1/job/9001",
+    "started_at": "2026-11-19T12:05:00Z",
+    "completed_at": "2026-11-19T12:09:00Z"
+  },
+  "repository": { "full_name": "acme/shop" }
+}

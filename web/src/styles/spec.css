@@ -1,0 +1,92 @@
+/* Spec page (T4.5): pele diagrams themed from the tokens, the prototype's zoom and full screen, devpage-style Markdown. */
+.dia-wrap{position:relative;padding-bottom:44px}
+.dia-tools{position:absolute;right:0;bottom:0;display:flex;gap:6px;align-items:center}
+.dia-tools .zoom{background:var(--surface);border:1px solid var(--line)}
+.fs-btn{display:inline-flex;align-items:center;gap:6px;background:var(--surface)}
+.zoom{display:inline-flex;align-items:center;gap:2px;padding:3px;background:var(--sunk);border-radius:10px}
+.zoom button{border:0;background:transparent;border-radius:7px;min-width:34px;min-height:32px;font:600 14px var(--f-mono)}
+.zoom button:hover{background:var(--surface)}
+.zoom span{font:500 11.5px var(--f-mono);color:var(--muted);min-width:44px;text-align:center}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+
+.spec-dia{overflow:hidden;cursor:grab;touch-action:pan-y;user-select:none;-webkit-user-select:none;
+  --pele-bg:var(--surface);--pele-fg:var(--fg);--pele-muted:var(--muted);--pele-line:var(--muted);--pele-surface:var(--surface);
+  --pele-surface-alt:var(--sunk);--pele-border:var(--line);--pele-accent:var(--accent);--pele-font:var(--f-body);--pele-font-mono:var(--f-mono);--pele-radius:10px;--ma-accent:var(--accent)}
+.spec-dia svg{display:block;width:100%;height:auto;margin:0 auto}
+.spec-dia.fill{flex:1;min-width:0;min-height:0;touch-action:none}
+.spec-dia.fill svg{height:100%;max-width:none}
+.spec-dia .pele-node{cursor:pointer}
+.spec-dia .pele-node :is(rect,polygon,circle,path){transition:fill .3s,stroke .3s}
+.spec-dia .pele-node:hover :is(rect,polygon,circle){stroke-width:2.6px}
+.spec-dia .pele-node[data-st=ok] :is(rect,polygon,circle){fill:var(--ok-soft);stroke:var(--ok)}
+.spec-dia .pele-node[data-st=warn] :is(rect,polygon,circle){fill:var(--warn-soft);stroke:var(--warn)}
+.spec-dia .pele-node[data-st=idle] :is(rect,polygon,circle){fill:var(--idle-soft);stroke:var(--idle);stroke-dasharray:4 3}
+.spec-dia .pele-node.sel :is(rect,polygon,circle){stroke:var(--accent);stroke-width:3.2px;stroke-dasharray:none}
+.spec-dia .pele-node:focus-visible,.spec-dia .pele-node a:focus-visible{outline:none}
+.spec-dia .pele-node:focus-visible :is(rect,polygon,circle),.spec-dia .pele-node a:focus-visible :is(rect,polygon,circle){stroke:var(--accent);stroke-width:3px}
+/* mermaid-actions: action nodes and the `toggle?class=checked` state */
+.spec-dia .checked :is(rect,polygon,circle){stroke:var(--ma-accent);stroke-width:3px}
+.spec-dia .checked .pele-label{text-decoration:line-through;opacity:.6}
+details.flash{outline:2px solid var(--accent);outline-offset:4px}
+.dia-error{color:var(--bad);background:var(--bad-soft);border-radius:8px;padding:10px 12px;font-size:13px;display:flex;flex-direction:column;gap:8px}
+
+.fs{position:fixed;inset:0;z-index:50;background:var(--bg);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);animation:pop .18s ease-out}
+.fs-bar{display:flex;align-items:center;gap:10px;padding-block:8px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line);background:var(--surface)}
+.fs-bar h2{flex:1;min-width:0;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fs-x{display:inline-flex;align-items:center;gap:6px}
+.fs-body{flex:1;min-height:0;overflow:hidden;display:flex;padding:8px max(8px,env(safe-area-inset-right,0px)) 8px max(8px,env(safe-area-inset-left,0px))}
+.fs-foot{display:grid;grid-template-columns:minmax(0,1fr);gap:6px 12px;align-items:center;padding-block:8px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));border-top:1px solid var(--line);background:var(--surface);font-size:13px}
+.fs-sum{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;min-width:0}
+.fs-extra{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between}
+
+.spec-md h1,.spec-md h2,.spec-md h3{margin:18px 0 6px}
+.spec-md .md-step button{all:unset;cursor:pointer;display:inline-flex;flex-wrap:wrap;gap:8px;align-items:baseline;border-radius:8px;padding:4px 8px;margin-left:-8px}
+.spec-md .md-step button:hover{background:var(--sunk)}
+.spec-md .md-step button:focus-visible{outline:2px solid var(--accent)}
+.spec-md .md-step.on button{background:var(--accent-soft)}
+.spec-md ul{display:flex;flex-direction:column;gap:6px;padding-left:20px}
+.spec-md .md-req{font-size:13.5px}
+.spec-md .md-dia{margin:10px 0}
+.md-flow{border-left:3px solid var(--accent);background:var(--sunk);padding:8px 12px;border-radius:0 8px 8px 0;font-size:13px;margin:10px 0}
+.md-flow .mono{color:var(--accent);font-size:11px;font-weight:600;display:block}
+.diags{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:13px}
+
+@media (max-width:760px){
+  .fs-xl{display:none}
+  .fs-bar{flex-wrap:wrap;gap:6px 8px}
+  .fs-bar h2{font-size:15px}
+  .fs-extra{display:none}
+}
+.spec-dia .pele-node[data-st=bad] :is(rect,polygon,circle){fill:var(--bad-soft);stroke:var(--bad)}
+.spec-dia .pele-node[data-st=root] :is(rect,polygon,circle){fill:var(--fg);stroke:var(--fg)}
+.spec-dia .pele-node[data-st=root] text{fill:var(--bg)}
+
+/* devpage server's page for the spec, on this origin (/d/<id>/). */
+.devpage-frame{display:block;width:100%;height:min(78vh,900px);border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+
+/* Diagram editor (T5.2), as in the prototype's edit mode. */
+.spec-dia .pele-node[data-st=new] :is(rect,polygon,circle){fill:var(--warn-soft);stroke:var(--warn);stroke-dasharray:5 3}
+.edit-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-radius:10px;background:var(--accent-soft)}
+.edit-bar .hint{font-size:12px;color:var(--muted);margin-right:auto}
+.edit-bar .btn.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.req-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 8px;align-items:center;padding:8px;border-radius:8px;background:var(--sunk)}
+.req-row .ears{font-size:10px}
+.req-row .x{grid-row:1 / span 2;grid-column:3}
+.req-row input,.arrow-lbl input{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;min-height:38px;min-width:0;width:100%}
+.arrow-lbl{flex:1;min-width:0}
+.arrow-lbl input{padding:6px 8px;font:12px var(--f-mono);min-height:34px}
+.editing .icon-btn:hover{color:var(--bad);border-color:var(--bad)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.save-sum ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:2px}
+
+/* Whiteboard (T5.7). */
+.board-title{font:700 clamp(22px,2.4vw,28px)/1.2 var(--f-display);letter-spacing:-.015em;color:var(--fg);background:transparent;border:1px solid transparent;border-radius:8px;padding:2px 6px;margin-left:-7px;width:100%;min-width:0}
+.board-title:hover,.board-title:focus{border-color:var(--line);background:var(--surface)}
+.board-cols{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:12px;align-items:start}
+@media (max-width:900px){.board-cols{grid-template-columns:minmax(0,1fr)}}
+.board-text{width:100%;min-height:180px;resize:vertical;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:10px;font:400 12.5px/1.6 var(--f-mono)}
+.board-preview{min-width:0}
+.board-svg{overflow:auto;max-width:100%}
+.board-svg svg{display:block;max-width:100%;height:auto;margin:0 auto}
+.fld select{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;min-height:38px}

@@ -8,6 +8,8 @@ import reviewSubmitted from "./recorded/webhooks/pull_request_review-submitted.j
 import reviewDismissed from "./recorded/webhooks/pull_request_review-dismissed.json";
 import suiteRequested from "./recorded/webhooks/check_suite-requested.json";
 import suiteCompleted from "./recorded/webhooks/check_suite-completed.json";
+import runInProgress from "./recorded/webhooks/check_run-in_progress.json";
+import runCompleted from "./recorded/webhooks/check_run-completed.json";
 import pushFeature from "./recorded/webhooks/push-feature.json";
 import pushMain from "./recorded/webhooks/push-main.json";
 
@@ -185,6 +187,21 @@ describe("webhook events", () => {
     expect(await liveEvents(repo.projectId)).toHaveLength(3);
   });
 
+  it("records check runs, never moves one backwards, and tells watchers of the PRs on that commit", async () => {
+    const repo = await setup();
+    await deliver("pull_request", synchronize, repo); // head is ccc333
+    await deliver("check_run", runInProgress, repo);
+    await deliver("check_run", runCompleted, repo);
+    await deliver("check_run", runInProgress, repo); // late duplicate of the first one
+    const runs = (await env.DB.prepare("SELECT name, status, conclusion, completed_at FROM pr_check_runs WHERE repo_id = ?1").bind(repo.repoId).all()).results;
+    expect(runs).toEqual([{ name: "Web (tsc, vitest)", status: "completed", conclusion: "failure", completed_at: "2026-11-19T12:09:00Z" }]);
+    expect((await liveEvents(repo.projectId)).map(([e, d]) => [e, (d as { cause: string }).cause])).toEqual([
+      ["pr.updated", "pull_request.synchronize"],
+      ["pr.updated", "check_run.created"],
+      ["pr.updated", "check_run.completed"],
+    ]);
+  });
+
   it("moves the head of a PR when its branch is pushed, and queues a sync for the files", async () => {
     const repo = await setup();
     await deliver("pull_request", opened, repo);
@@ -207,6 +224,18 @@ describe("webhook events", () => {
     await deliver("push", pushMain, repo);
     const events = await liveEvents(repo.projectId);
     expect(events.at(-1)).toEqual(["repo.pushed", { repo: repo.fullName, branch: "main", sha: "000bbb" }]);
+  });
+
+  it("re-indexes specs when the default branch is pushed, once while one is waiting", async () => {
+    const repo = await setup();
+    const indexJobs = async () =>
+      (await env.DB.prepare("SELECT target, state FROM jobs WHERE project_id = ?1 AND kind = 'index'").bind(repo.projectId).all()).results;
+    await deliver("push", pushFeature, repo);
+    expect(await indexJobs()).toEqual([]);
+    await deliver("push", pushMain, repo);
+    expect(await indexJobs()).toEqual([{ target: repo.repoId, state: "queued" }]);
+    await deliver("push", pushMain, repo, { delivery: crypto.randomUUID() });
+    expect(await indexJobs()).toHaveLength(1);
   });
 
   it("serves the same recorded delivery twice without duplicating rows", async () => {

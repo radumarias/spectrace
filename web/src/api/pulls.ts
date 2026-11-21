@@ -64,6 +64,23 @@ export function usePull(projectId: string | undefined, pullId: string | undefine
   });
 }
 
+export type PullDiff = components["schemas"]["PullDiff"];
+
+/** The unified diff of each changed file (`GET /api/projects/{id}/pulls/{pullId}/diff`), loaded when the Files tab opens. */
+export function usePullDiff(projectId: string | undefined, pullId: string | undefined, enabled: boolean) {
+  return useQuery({
+    queryKey: ["pull-diff", projectId, pullId] as const,
+    enabled: enabled && Boolean(projectId && pullId),
+    queryFn: async (): Promise<Map<string, string | null>> => {
+      const { data, response } = await api.GET("/api/projects/{projectId}/pulls/{pullId}/diff", {
+        params: { path: { projectId: projectId!, pullId: pullId! } },
+      });
+      if (!data) throw new Error(`Could not load the changes (${response.status}).`);
+      return new Map(data.files.map((f) => [f.path, f.patch]));
+    },
+  });
+}
+
 export type PullReview = components["schemas"]["PullReview"];
 
 function apiError(error: unknown, fallback: string): Error {

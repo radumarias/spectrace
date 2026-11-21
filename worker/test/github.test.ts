@@ -85,11 +85,13 @@ const pair = (res: Response, name: string): string | null => {
   return raw ? raw.split(";")[0]! : null;
 };
 
-async function signIn(): Promise<string> {
+/** Signs in, then forgets the installations that sign-in linked, so a test starts with none. */
+async function signIn(keepInstallations = false): Promise<string> {
   const login = await call("/api/auth/github/login");
   const stateCookie = pair(login, "spectrace_oauth_state")!;
   const state = stateCookie.split("=")[1]!;
   const cb = await call(`/api/auth/github/callback?code=good-code&state=${state}`, { headers: { cookie: stateCookie } });
+  if (!keepInstallations) await env.DB.exec("DELETE FROM user_installations; DELETE FROM github_installations;");
   return pair(cb, "spectrace_session")!;
 }
 
@@ -122,6 +124,13 @@ beforeEach(async () => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("GitHub App", () => {
+  it("signing in links the installations GitHub lists for the user", async () => {
+    const session = await signIn(true);
+    const rows = await env.DB.prepare("SELECT installation_id FROM user_installations ORDER BY installation_id").all<{ installation_id: number }>();
+    expect(rows.results.map((r) => r.installation_id)).toEqual([1001, 2002]);
+    expect(await repos(session)).toHaveLength(152);
+  });
+
   it("the repo list only has repos from the user's installations", async () => {
     const session = await signIn();
     expect(await repos(session)).toEqual([]);

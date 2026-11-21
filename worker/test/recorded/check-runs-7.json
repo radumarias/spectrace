@@ -1,0 +1,8 @@
+{
+  "total_count": 3,
+  "check_runs": [
+    { "id": 11, "name": "Rust (fmt, clippy, test)", "head_sha": "aaa111", "status": "completed", "conclusion": "success", "html_url": "https://github.com/acme/shop/actions/runs/2/job/11", "started_at": "2026-11-19T10:00:00Z", "completed_at": "2026-11-19T10:03:00Z" },
+    { "id": 12, "name": "Web (tsc, vitest)", "head_sha": "aaa111", "status": "completed", "conclusion": "failure", "html_url": "https://github.com/acme/shop/actions/runs/2/job/12", "started_at": "2026-11-19T10:00:00Z", "completed_at": "2026-11-19T10:02:00Z" },
+    { "id": 13, "name": "E2E", "head_sha": "aaa111", "status": "in_progress", "conclusion": null, "html_url": "https://github.com/acme/shop/actions/runs/2/job/13", "started_at": "2026-11-19T10:00:00Z", "completed_at": null }
+  ]
+}

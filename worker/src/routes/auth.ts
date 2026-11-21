@@ -2,6 +2,7 @@ import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppEnv } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { linkUserInstallations } from "../github-app";
 import {
   SESSION_COOKIE,
   SESSION_DAYS,
@@ -48,6 +49,7 @@ const callbackRoute = createRoute({
       code: z.string().optional(),
       state: z.string().optional(),
       error: z.string().optional(),
+      setup_action: z.string().optional(),
     }),
   },
   responses: { 303: { description: "Signed in, redirect to /" }, ...errors, 502: { description: "GitHub failed", content: { "application/json": { schema: ErrorBody } } } },
@@ -101,11 +103,16 @@ export function registerAuth(app: OpenAPIHono<AppEnv>) {
 
   app.openapi(callbackRoute, async (c) => {
     const gh = githubConfig(c);
-    const { code, state, error } = c.req.valid("query");
+    const { code, state, error, setup_action } = c.req.valid("query");
     if (error) throw AppError.badRequest(`GitHub refused sign-in: ${error}`);
     if (!code || !state) throw AppError.badRequest("missing code or state");
     const expected = getCookie(c, STATE_COOKIE);
-    if (!expected || expected !== state) throw AppError.badRequest("sign-in state does not match");
+    if (!expected || expected !== state) {
+      // The App's setup URL can point here: GitHub sends people back after installing, with no sign-in state.
+      // Start a normal sign-in; it links the new installation.
+      if (setup_action) return c.redirect("/api/auth/github/login", 303);
+      throw AppError.badRequest("sign-in state does not match");
+    }
 
     const token = await upstreamJson<{ access_token?: string; error_description?: string }>(
       "token request",
@@ -144,6 +151,9 @@ export function registerAuth(app: OpenAPIHono<AppEnv>) {
       .bind(crypto.randomUUID(), p.id, p.login, p.name ?? null, p.avatar_url ?? null, now.toISOString())
       .first<{ id: string }>();
     if (!user) throw new AppError("internal", "user upsert returned no row");
+
+    // An App installed before (or without coming back through the install page) is picked up on every sign-in.
+    await linkUserInstallations(c.env.DB, gh.apiUrl, user.id, accessToken);
 
     const sessionToken = randomToken();
     const expires = new Date(now.getTime() + SESSION_DAYS * 86_400_000);

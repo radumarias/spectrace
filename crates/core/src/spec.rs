@@ -165,6 +165,7 @@ pub struct Diagram {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub clicks: Vec<Click>,
+    pub actions: Vec<Action>,
     pub comments: Vec<Comment>,
 }
 
@@ -210,6 +211,21 @@ pub struct Click {
     pub node: String,
     /// The step id after `spec://`.
     pub target: String,
+    pub line: usize,
+    pub span: Span,
+}
+
+/// `click pay href "action:copy?text=cargo%20test" "Copy the test command"`,
+/// a mermaid-actions link the app runs.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Action {
+    pub node: String,
+    /// The full href as written inside the quotes, `action:copy?text=...`.
+    pub href: String,
+    /// The action name, `copy`.
+    pub name: String,
+    pub tooltip: Option<String>,
     pub line: usize,
     pub span: Span,
 }
@@ -598,8 +614,10 @@ impl<'a> Parser<'a> {
             nodes: Vec::new(),
             edges: Vec::new(),
             clicks: Vec::new(),
+            actions: Vec::new(),
             comments: Vec::new(),
         };
+        let mut clicked: HashSet<String> = HashSet::new();
         let mut declared: HashSet<String> = HashSet::new();
         let mut edge_keys: HashSet<(String, String, String)> = HashSet::new();
         let mut header_seen = false;
@@ -696,20 +714,24 @@ impl<'a> Parser<'a> {
                         span,
                     });
                 }
+                DiagramLine::Action {
+                    node,
+                    href,
+                    name,
+                    tooltip,
+                } => {
+                    self.check_click_node(node, no, &declared, &mut clicked);
+                    d.actions.push(Action {
+                        node: node.to_string(),
+                        href: href.to_string(),
+                        name: name.to_string(),
+                        tooltip: tooltip.map(str::to_string),
+                        line: no,
+                        span,
+                    });
+                }
                 DiagramLine::Click { node, target } => {
-                    if !is_valid_segment(node) {
-                        self.report(
-                            Code::S006,
-                            no,
-                            format!("node id `{node}` breaks the id grammar"),
-                        );
-                    } else if !declared.contains(node) {
-                        self.report(
-                            Code::S007,
-                            no,
-                            format!("`click` names undeclared node `{node}`"),
-                        );
-                    }
+                    self.check_click_node(node, no, &declared, &mut clicked);
                     let want = format!("{}.{node}", self.flow);
                     if target != want {
                         self.report(
@@ -736,6 +758,36 @@ impl<'a> Parser<'a> {
             );
         }
         Some(d)
+    }
+
+    /// Checks the node of a `click` line: id grammar, declared, one click per node.
+    fn check_click_node(
+        &mut self,
+        node: &str,
+        no: usize,
+        declared: &HashSet<String>,
+        clicked: &mut HashSet<String>,
+    ) {
+        if !is_valid_segment(node) {
+            self.report(
+                Code::S006,
+                no,
+                format!("node id `{node}` breaks the id grammar"),
+            );
+        } else if !declared.contains(node) {
+            self.report(
+                Code::S007,
+                no,
+                format!("`click` names undeclared node `{node}`"),
+            );
+        }
+        if !clicked.insert(node.to_string()) {
+            self.report(
+                Code::S015,
+                no,
+                format!("node `{node}` has more than one `click` line, Mermaid keeps only one"),
+            );
+        }
     }
 
     fn section(&mut self, start: usize, end: usize, in_code: &[bool]) -> Option<Section> {
@@ -1105,6 +1157,12 @@ enum DiagramLine<'a> {
         node: &'a str,
         target: &'a str,
     },
+    Action {
+        node: &'a str,
+        href: &'a str,
+        name: &'a str,
+        tooltip: Option<&'a str>,
+    },
     Bad(Code, String),
 }
 
@@ -1137,7 +1195,7 @@ fn diagram_line(t: &str) -> DiagramLine<'_> {
     }
     let words: Vec<&str> = t.split_whitespace().collect();
     if words.first() == Some(&"click") {
-        return click_line(&words);
+        return click_line(t, &words);
     }
     if t.contains("-->") {
         return edge_line(t);
@@ -1161,26 +1219,57 @@ fn diagram_line(t: &str) -> DiagramLine<'_> {
     DiagramLine::Bad(Code::S004, what)
 }
 
-fn click_line<'a>(words: &[&'a str]) -> DiagramLine<'a> {
-    let bad = || {
-        DiagramLine::Bad(
-            Code::S004,
-            "`click` must be `click <node> href \"spec://<flow>.<node>\"`".into(),
-        )
-    };
-    let [_, node, "href", quoted] = words else {
-        return bad();
-    };
-    let Some(target) = quoted
-        .strip_prefix("\"spec://")
-        .and_then(|q| q.strip_suffix('"'))
-    else {
-        return bad();
-    };
-    if !is_plain_id(node) {
-        return bad();
+const CLICK_FORMS: &str = "`click` must be `click <node> href \"spec://<flow>.<node>\"` or `click <node> href \"action:<name>[?<query>]\" [\"<tooltip>\"]`";
+
+fn click_line<'a>(t: &'a str, words: &[&'a str]) -> DiagramLine<'a> {
+    let bad = || DiagramLine::Bad(Code::S004, CLICK_FORMS.into());
+    if let [_, node, "href", quoted] = words {
+        if let Some(target) = quoted
+            .strip_prefix("\"spec://")
+            .and_then(|q| q.strip_suffix('"'))
+        {
+            if is_plain_id(node) {
+                return DiagramLine::Click { node, target };
+            }
+            return bad();
+        }
     }
-    DiagramLine::Click { node, target }
+    action_line(t).unwrap_or_else(bad)
+}
+
+/// `click <node> href "action:<name>[?<query>]"` and an optional ` "<tooltip>"`,
+/// single spaces only.
+fn action_line(t: &str) -> Option<DiagramLine<'_>> {
+    let rest = t.strip_prefix("click ")?;
+    let (node, rest) = rest.split_once(" href \"")?;
+    let (href, rest) = rest.split_once('"')?;
+    let tooltip = match rest {
+        "" => None,
+        _ => {
+            let tip = rest.strip_prefix(" \"")?.strip_suffix('"')?;
+            if tip.is_empty() || tip.contains('"') {
+                return None;
+            }
+            Some(tip)
+        }
+    };
+    let name = href
+        .strip_prefix("action:")?
+        .split('?')
+        .next()
+        .unwrap_or_default();
+    let mut chars = name.chars();
+    let ok = chars.next().is_some_and(|c| c.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !ok || href.contains(char::is_whitespace) || !is_plain_id(node) {
+        return None;
+    }
+    Some(DiagramLine::Action {
+        node,
+        href,
+        name,
+        tooltip,
+    })
 }
 
 fn edge_line(t: &str) -> DiagramLine<'_> {

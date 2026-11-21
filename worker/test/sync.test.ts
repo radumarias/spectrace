@@ -4,10 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { hashToken } from "../src/auth";
 import { forgetInstallationTokens } from "../src/github-app";
+import { MAX_PATCH_CHARS } from "../src/pulls";
 import { JOBS_QUEUE, type JobMessage } from "../src/jobs/queue";
 import pullsOpen from "./recorded/pulls-open.json";
 import files7 from "./recorded/files-7.json";
 import files9 from "./recorded/files-9.json";
+import checkRuns7 from "./recorded/check-runs-7.json";
 
 // GitHub is never called: every request to the API host is answered from the
 // recorded responses in test/recorded/ (shaped like GitHub's own).
@@ -17,6 +19,12 @@ let files: Record<number, unknown[]>;
 let requests: string[];
 /** Pull requests no longer open on GitHub, by number (what `GET /pulls/{n}` answers). */
 let closed: Record<number, { merged_at: string | null }>;
+/** What `GET /pulls?state=closed` lists: recently closed pull requests, merged ones with `merged_at`. */
+let closedList: unknown[] = [];
+/** Check runs by head commit, as `GET /commits/{sha}/check-runs` answers; a missing commit answers 403 (App without "Checks: read"). */
+let checkRuns: Record<string, unknown[]>;
+/** The account the App is installed on for acme/shop, as `GET /repos/acme/shop/installation` answers; null = not installed. */
+let installedOn: { id: number; account: { id: number; login: string; type: string } } | null = null;
 
 function mockGithub() {
   requests = [];
@@ -30,12 +38,15 @@ function mockGithub() {
     if (/^\/app\/installations\/\d+\/access_tokens$/.test(path)) {
       return Response.json({ token: "ghs_test", expires_at: new Date(Date.now() + 3_600_000).toISOString() }, { status: 201 });
     }
+    if (path === "/repos/acme/shop/installation") return installedOn ? Response.json(installedOn) : Response.json({}, { status: 404 });
     if (req.headers.get("authorization") !== "Bearer ghs_test") return Response.json({}, { status: 401 });
     const page = Number(url.searchParams.get("page") ?? "1");
     const slice = (all: unknown[]) => all.slice((page - 1) * 100, page * 100);
-    if (path === "/repos/acme/shop/pulls") return Response.json(slice(pulls));
+    if (path === "/repos/acme/shop/pulls") return Response.json(slice(url.searchParams.get("state") === "closed" ? closedList : pulls));
     const f = /^\/repos\/acme\/shop\/pulls\/(\d+)\/files$/.exec(path);
     if (f) return Response.json(slice(files[Number(f[1])] ?? []));
+    const cr = /^\/repos\/acme\/shop\/commits\/([^/]+)\/check-runs$/.exec(path);
+    if (cr) return checkRuns[cr[1]!] ? Response.json({ total_count: checkRuns[cr[1]!]!.length, check_runs: checkRuns[cr[1]!] }) : Response.json({}, { status: 403 });
     const d = /^\/repos\/acme\/shop\/pulls\/(\d+)$/.exec(path);
     if (d && closed[Number(d[1])]) return Response.json({ number: Number(d[1]), state: "closed", ...closed[Number(d[1])] });
     return Response.json({ message: "Not Found" }, { status: 404 });
@@ -86,12 +97,71 @@ beforeEach(() => {
   forgetInstallationTokens();
   pulls = structuredClone(pullsOpen);
   closed = {};
+  closedList = [];
+  installedOn = null;
+  checkRuns = { aaa111: structuredClone(checkRuns7.check_runs) };
   files = { 7: structuredClone(files7), 9: structuredClone(files9) };
   mockGithub();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("sync job", () => {
+  it("picks up an installation made outside spectrace when it is on the owner's own account", async () => {
+    const { projectId, userId } = await setup({ installation: false });
+    const login = (await env.DB.prepare("SELECT login FROM users WHERE id = ?1").bind(userId).first<{ login: string }>())!.login;
+    installedOn = { id: 777, account: { id: 1, login, type: "User" } };
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    expect((await env.DB.prepare("SELECT installation_id FROM user_installations WHERE user_id = ?1").bind(userId).all()).results).toEqual([{ installation_id: 777 }]);
+  });
+
+  it("does not link an installation that belongs to someone else", async () => {
+    const { projectId } = await setup({ installation: false });
+    installedOn = { id: 778, account: { id: 2, login: "someone-else", type: "User" } };
+    expect((await runSync(projectId))?.state).toBe("failed");
+  });
+
+  it("stores recently merged and closed pull requests that were never seen open", async () => {
+    const { projectId, repoId } = await setup();
+    const base = pullsOpen[0]!;
+    closedList = [
+      { ...base, number: 3, id: 303, title: "Shipped", state: "closed", merged_at: "2026-11-20T10:00:00Z" },
+      { ...base, number: 4, id: 304, title: "Dropped", state: "closed", merged_at: null },
+    ];
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    expect((await env.DB.prepare("SELECT number, state, merged_at FROM pull_requests WHERE repo_id = ?1 AND number IN (3, 4) ORDER BY number").bind(repoId).all()).results).toEqual([
+      { number: 3, state: "closed", merged_at: "2026-11-20T10:00:00Z" },
+      { number: 4, state: "closed", merged_at: null },
+    ]);
+  });
+
+  it("stores each file's diff, and leaves it empty when GitHub sends none or it is too large", async () => {
+    const { projectId, repoId } = await setup();
+    files[9] = [{ filename: "huge.sql", status: "modified", additions: 1, deletions: 0, patch: "@@ -1 +1 @@\n+" + "x".repeat(MAX_PATCH_CHARS) } as never];
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    const patches = (await env.DB.prepare("SELECT path, patch FROM pr_files p JOIN pull_requests r ON r.id = p.pull_request_id WHERE r.repo_id = ?1 ORDER BY path").bind(repoId).all()).results;
+    expect(patches).toEqual([
+      { path: "huge.sql", patch: null },
+      { path: "src/checkout/coupon.ts", patch: null },
+      { path: "src/checkout/pay.ts", patch: expect.stringContaining("+  const discounted = applyCoupon(total, coupon);") },
+    ]);
+  });
+
+  it("stores the check runs of each open PR's head commit, and carries on when GitHub refuses them", async () => {
+    const { projectId, repoId } = await setup();
+    // PR 9 (head bbb222) has no entry, so GitHub answers 403 for it.
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    const stored = () => env.DB.prepare("SELECT head_sha, name, status, conclusion FROM pr_check_runs WHERE repo_id = ?1 ORDER BY github_check_run_id").bind(repoId).all();
+    expect((await stored()).results).toEqual([
+      { head_sha: "aaa111", name: "Rust (fmt, clippy, test)", status: "completed", conclusion: "success" },
+      { head_sha: "aaa111", name: "Web (tsc, vitest)", status: "completed", conclusion: "failure" },
+      { head_sha: "aaa111", name: "E2E", status: "in_progress", conclusion: null },
+    ]);
+    // Syncing again after the run finished updates it in place.
+    checkRuns.aaa111 = checkRuns.aaa111!.map((r) => ((r as { id: number }).id === 13 ? { ...(r as object), status: "completed", conclusion: "success" } : r));
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    expect((await stored()).results[2]).toEqual({ head_sha: "aaa111", name: "E2E", status: "completed", conclusion: "success" });
+  });
+
   it("stores the open pull requests and their files", async () => {
     const { projectId, repoId } = await setup();
     expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });

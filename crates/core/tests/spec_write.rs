@@ -66,7 +66,13 @@ fn content(s: &Spec) -> String {
         })
         .collect();
     sections.sort();
-    out.push_str(&format!("{nodes:?}\n{edges:?}\n{clicks:?}\n"));
+    let mut actions: Vec<_> = d
+        .actions
+        .iter()
+        .map(|a| (&a.node, &a.href, &a.tooltip))
+        .collect();
+    actions.sort();
+    out.push_str(&format!("{nodes:?}\n{edges:?}\n{clicks:?}\n{actions:?}\n"));
     for s in sections {
         out.push_str(&s);
         out.push('\n');
@@ -627,5 +633,59 @@ fn refuses_text_that_would_read_back_differently() {
     assert!(
         matches!(err, WriteError::Mismatch(_) | WriteError::Invalid(_)),
         "{err}"
+    );
+}
+
+// ---- Action clicks.
+
+const ACTIONS: &str = concat!(
+    "  click pay href \"action:copy?text=cargo%20test%20pay\" \"Copy the test command\"\n",
+    "  click paid href \"action:toggle?class=checked\" \"Mark as done\"\n",
+    "  click failed href \"action:show?id=retry-notes\"\n",
+);
+
+fn with_actions() -> String {
+    let src = CHECKOUT
+        .replace("  click pay href \"spec://checkout.pay\"\n", "")
+        .replace("  click paid href \"spec://checkout.paid\"\n", "")
+        .replace("  click failed href \"spec://checkout.failed\"\n", ACTIONS);
+    assert!(src.contains(ACTIONS));
+    src
+}
+
+#[test]
+fn action_lines_round_trip_byte_for_byte() {
+    let src = with_actions();
+    let spec = model(&src);
+    assert_eq!(spec.diagram.as_ref().unwrap().actions.len(), 3);
+    assert_eq!(write(&src, &spec, &spec).unwrap(), src);
+}
+
+#[test]
+fn removing_a_step_removes_its_action_line() {
+    let src = with_actions();
+    let out = edit(&src, |s, _| {
+        assert!(s.remove_step("paid"));
+    });
+    assert!(!out.contains("action:toggle"), "{out}");
+    assert!(out.contains("action:copy?text=cargo%20test%20pay"));
+    assert!(out.contains("action:show?id=retry-notes"));
+}
+
+#[test]
+fn an_edited_action_is_written_back() {
+    let src = with_actions();
+    let out = edit(&src, |s, _| {
+        let a = &mut s.diagram.as_mut().unwrap().actions[1];
+        a.tooltip = Some("Mark it done".into());
+    });
+    let (removed, added) = diff(&src, &out);
+    assert_eq!(
+        removed,
+        lines(&["  click paid href \"action:toggle?class=checked\" \"Mark as done\""])
+    );
+    assert_eq!(
+        added,
+        lines(&["  click paid href \"action:toggle?class=checked\" \"Mark it done\""])
     );
 }

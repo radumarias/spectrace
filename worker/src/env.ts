@@ -1,3 +1,4 @@
+import type { DevpageServer } from "./devpage-container";
 import type { ProjectHub } from "./hub";
 import type { JobMessage } from "./jobs/queue";
 
@@ -22,6 +23,17 @@ export interface Bindings {
   GITHUB_APP_PRIVATE_KEY?: string;
   /** The GitHub App's webhook secret (T2.2). Secret. The webhook endpoint answers 500 until it is set. */
   GITHUB_WEBHOOK_SECRET?: string;
+  /** devpage server as a Cloudflare Container (see src/devpage.ts). Used only once DEVPAGE_BUCKET_URL is set. */
+  DEVPAGE?: DurableObjectNamespace<DevpageServer>;
+  /** Where devpage server keeps every version: `s3://<bucket>/<prefix>`, an R2 bucket through its S3 API. Unset, devpage is off. */
+  DEVPAGE_BUCKET_URL?: string;
+  /** R2's S3 endpoint, `https://<account id>.r2.cloudflarestorage.com`, and an R2 API token's keys (secrets). */
+  AWS_ENDPOINT_URL?: string;
+  AWS_ACCESS_KEY_ID?: string;
+  AWS_SECRET_ACCESS_KEY?: string;
+  AWS_REGION?: string;
+  /** A devpage server reached over HTTP instead of the container: a local `devpage server`, or a fake in tests. */
+  DEVPAGE_ORIGIN?: string;
   /** Overrides for tests: default `https://github.com` and `https://api.github.com`. */
   GITHUB_OAUTH_URL?: string;
   GITHUB_API_URL?: string;

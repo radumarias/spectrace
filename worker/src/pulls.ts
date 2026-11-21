@@ -30,7 +30,12 @@ export interface GhFile {
   previous_filename?: string;
   additions: number;
   deletions: number;
+  /** GitHub's unified diff; left out for binary files and for diffs it finds too large. */
+  patch?: string;
 }
+
+/** Longest diff kept for one file. Longer ones are shown as "too large" with a link to GitHub. */
+export const MAX_PATCH_CHARS = 60_000;
 
 /** D1 allows 100 bound values per statement. */
 const FILE_ROWS_PER_INSERT = 12;
@@ -87,6 +92,12 @@ export function pullStatements(env: Bindings, repoId: string, id: string, pr: Gh
           ...chunk.flatMap((f) => [f.filename, f.status, f.previous_filename ?? null, f.additions, f.deletions]),
         ),
       );
+    }
+    // One statement per diff: they are big, and most files have one.
+    for (const f of files) {
+      if (f.patch && f.patch.length <= MAX_PATCH_CHARS) {
+        statements.push(env.DB.prepare("UPDATE pr_files SET patch = ?3 WHERE pull_request_id = ?1 AND path = ?2").bind(id, f.filename, f.patch));
+      }
     }
   }
   return statements;

@@ -4,6 +4,7 @@ import { INDEX_KIND, indexRepo } from "./jobs/index-repo";
 import { consume, registerHandler, type JobMessage } from "./jobs/queue";
 import "./jobs/sync"; // registers the "sync" job kind
 
+export { DevpageServer } from "./devpage-container";
 export { ProjectHub } from "./hub";
 
 registerHandler(INDEX_KIND, indexRepo);

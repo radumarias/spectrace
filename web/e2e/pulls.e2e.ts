@@ -4,7 +4,7 @@ import { expect, expectNoHorizontalScroll, mockApi, test, trackErrors, USER } fr
 const repo = (id: string, full_name: string) => ({ id, github_repo_id: null, full_name, default_branch: "main", index_state: "ready" });
 const PROJECT = { id: "p1", name: "Shop", context: "", created_at: "2026-11-21T10:00:00Z", updated_at: "2026-11-21T10:00:00Z", repos: [repo("r1", "acme/shop"), repo("r2", "acme/api")] };
 const pull = (id: string, repoName: string, number: number, title: string, o: Record<string, unknown> = {}) => ({
-  id, repo: repoName, number, title, author: "ana", state: "open", draft: false, needsYou: true, headRef: "feat", baseRef: "main",
+  id, repo: repoName, number, title, author: "ana", state: "open", draft: false, needsYou: true, testsTotal: 3, testsPassed: 3, testsFailed: 0, headRef: "feat", baseRef: "main",
   htmlUrl: "https://github.com/x", additions: 10, deletions: 2, changedFiles: 3,
   createdAt: "2026-11-21T10:00:00Z", updatedAt: "2026-11-21T10:00:00Z", mergedAt: null, syncedAt: "2026-11-21T10:00:00Z", ...o,
 });
@@ -36,7 +36,7 @@ test("the inbox matches the seeded pull requests and the filters change it", asy
   await expect(rows).toHaveCount(1);
   await expect(rows.first()).toContainText("Add refunds to checkout");
   await expect(rows.first()).toContainText("acme/shop #142");
-  await expect(rows.first()).toContainText("tests not run");
+  await expect(rows.first()).toContainText("tests 3/3");
   await expect(rows.first()).toContainText("risk not rated");
   await expect(rows.first()).toContainText("needs you");
   await expect(rows.first()).toHaveAttribute("href", "/pr/a");

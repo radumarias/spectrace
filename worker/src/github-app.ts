@@ -186,3 +186,73 @@ export function appConfigFromEnv(env: Bindings): AppConfig {
     apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, ""),
   };
 }
+
+/**
+ * Record every installation of the App that GitHub lists for this user token (`GET /user/installations`)
+ * and link them to the user. Best effort: sign-in must not fail because this did. Returns how many were linked.
+ */
+export async function linkUserInstallations(db: D1Database, apiUrl: string, userId: string, userToken: string): Promise<number> {
+  try {
+    const found: { id: number; repository_selection: string; account: { id: number; login: string; type: string } }[] = [];
+    for (let page = 1; page <= 10; page++) {
+      const res = await fetch(`${apiUrl}/user/installations?per_page=100&page=${page}`, { headers: ghHeaders(userToken) });
+      if (!res.ok) return 0;
+      const batch = ((await res.json()) as { installations?: typeof found }).installations ?? [];
+      found.push(...batch);
+      if (batch.length < 100) break;
+    }
+    const now = new Date().toISOString();
+    const statements = found.flatMap((i) => [
+      db
+        .prepare(
+          `INSERT INTO github_installations (id, account_id, account_login, account_type, repository_selection, created_at, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+           ON CONFLICT (id) DO UPDATE SET account_id = excluded.account_id, account_login = excluded.account_login,
+             account_type = excluded.account_type, repository_selection = excluded.repository_selection, updated_at = excluded.updated_at`,
+        )
+        .bind(i.id, i.account.id, i.account.login, i.account.type, i.repository_selection, now),
+      db.prepare("INSERT OR IGNORE INTO user_installations (user_id, installation_id, created_at) VALUES (?1, ?2, ?3)").bind(userId, i.id, now),
+    ]);
+    if (statements.length) await db.batch(statements);
+    return found.length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Ask GitHub which installation of the App covers a repo, record it, and link it to the project's owner when
+ * that person is entitled to it: the installation is on their own account, or they are a member of the
+ * organisation it is on. Returns the installation id, or null when the App is not on the repo or the owner may
+ * not use it. This is how an installation made outside spectrace's own install page gets picked up.
+ */
+export async function linkRepoInstallation(app: AppConfig, db: D1Database, ownerId: string, fullName: string): Promise<number | null> {
+  const res = await fetch(`${app.apiUrl}/repos/${fullName}/installation`, { headers: ghHeaders(await appJwt(app)) });
+  if (!res.ok) return null;
+  const inst = (await res.json()) as { id: number; repository_selection?: string; account?: { id: number; login: string; type: string } };
+  if (!inst.account) return null;
+  const user = await db.prepare("SELECT login FROM users WHERE id = ?1").bind(ownerId).first<{ login: string }>();
+  if (!user) return null;
+  let entitled = inst.account.login.toLowerCase() === user.login.toLowerCase();
+  if (!entitled && inst.account.type === "Organization") {
+    const token = await installationToken(app, inst.id);
+    if (token) {
+      const member = await fetch(`${app.apiUrl}/orgs/${inst.account.login}/members/${user.login}`, { headers: ghHeaders(token) });
+      entitled = member.status === 204;
+    }
+  }
+  if (!entitled) return null;
+  const now = new Date().toISOString();
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO github_installations (id, account_id, account_login, account_type, repository_selection, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+         ON CONFLICT (id) DO UPDATE SET account_login = excluded.account_login, account_type = excluded.account_type,
+           repository_selection = excluded.repository_selection, updated_at = excluded.updated_at`,
+      )
+      .bind(inst.id, inst.account.id, inst.account.login, inst.account.type, inst.repository_selection ?? "all", now),
+    db.prepare("INSERT OR IGNORE INTO user_installations (user_id, installation_id, created_at) VALUES (?1, ?2, ?3)").bind(ownerId, inst.id, now),
+  ]);
+  return inst.id;
+}

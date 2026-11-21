@@ -8,7 +8,9 @@
 // longer open on GitHub are marked closed (with `merged_at` when merged).
 import type { Bindings } from "../env";
 import { AppError } from "../error";
-import { appConfigFromEnv, ghHeaders, installationToken, type AppConfig } from "../github-app";
+import { appConfigFromEnv, ghHeaders, installationToken, linkRepoInstallation, type AppConfig } from "../github-app";
+import { checkRunStatement, type GhCheckRun } from "../checks";
+import { log } from "../log";
 import { pullStatements, type GhFile, type GhPull } from "../pulls";
 import { PermanentError, registerHandler, type JobHandler } from "./queue";
 
@@ -16,6 +18,9 @@ export const SYNC_KIND = "sync";
 const PAGE_SIZE = 100;
 /** GitHub stops listing a PR's files after 3000. */
 const MAX_FILE_PAGES = 30;
+/** How many pages (of 100) of recently closed PRs a sync reads. */
+const RECENT_CLOSED_PAGES = 1;
+const MAX_CHECK_PAGES = 5;
 
 interface RepoRow {
   id: string;
@@ -39,6 +44,29 @@ async function ghPages<T>(app: AppConfig, token: string, what: string, path: str
     if (batch.length < PAGE_SIZE) break;
   }
   return out;
+}
+
+/**
+ * Copy the check runs of a commit. Never fails the sync: the App may lack the
+ * "Checks: read" permission, and the `check_run` webhook keeps them current anyway.
+ */
+async function syncChecks(env: Bindings, app: AppConfig, token: string, repo: RepoRow, sha: string): Promise<void> {
+  try {
+    const runs: GhCheckRun[] = [];
+    for (let page = 1; page <= MAX_CHECK_PAGES; page++) {
+      const res = await fetch(`${app.apiUrl}/repos/${repo.full_name}/commits/${sha}/check-runs?per_page=${PAGE_SIZE}&page=${page}`, { headers: ghHeaders(token) });
+      if (!res.ok) {
+        log("warn", "sync could not read check runs", { repo: repo.full_name, sha, status: res.status }, env.LOG_FORMAT);
+        return;
+      }
+      const batch = ((await res.json()) as { check_runs?: GhCheckRun[] }).check_runs ?? [];
+      runs.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+    }
+    if (runs.length > 0) await env.DB.batch(runs.map((r) => checkRunStatement(env, repo.id, { ...r, head_sha: sha })));
+  } catch (error) {
+    log("warn", "sync could not read check runs", { repo: repo.full_name, sha, error: String(error) }, env.LOG_FORMAT);
+  }
 }
 
 /** The installation that owns a repo: one of the project owner's installations on the repo's account. */
@@ -70,7 +98,11 @@ async function mergedAtOf(app: AppConfig, token: string, fullName: string, numbe
 }
 
 async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: RepoRow, progress: (n: number) => Promise<void>): Promise<number> {
-  const installationId = await installationFor(env, projectId, repo.full_name);
+  let installationId = await installationFor(env, projectId, repo.full_name);
+  if (installationId === null) {
+    const owner = await env.DB.prepare("SELECT owner_id FROM projects WHERE id = ?1").bind(projectId).first<{ owner_id: string }>();
+    if (owner) installationId = await linkRepoInstallation(app, env.DB, owner.owner_id, repo.full_name);
+  }
   if (installationId === null) throw new PermanentError(`no GitHub App installation for ${repo.full_name}; install the app on its owner first`);
   const token = await installationToken(app, installationId);
   if (token === null) throw new PermanentError(`GitHub no longer knows installation ${installationId}`);
@@ -90,13 +122,22 @@ async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: 
     const files = before?.files_sha === pr.head.sha ? null : await ghPages<GhFile>(app, token, `files of ${repo.full_name}#${pr.number}`, `/repos/${repo.full_name}/pulls/${pr.number}/files`, MAX_FILE_PAGES);
     // One batch is one transaction: a PR never shows half its files.
     await env.DB.batch(pullStatements(env, repo.id, before?.id ?? crypto.randomUUID(), pr, files));
+    await syncChecks(env, app, token, repo, pr.head.sha);
     await progress(pr.number);
+  }
+
+  // Recently closed PRs, so merged ones show up even if we never saw them open. The list endpoint carries
+  // `merged_at`; files are not read for these.
+  const closed = await ghPages<GhPull>(app, token, `closed pulls of ${repo.full_name}`, `/repos/${repo.full_name}/pulls?state=closed&sort=updated&direction=desc`, RECENT_CLOSED_PAGES);
+  for (const pr of closed) {
+    await env.DB.batch(pullStatements(env, repo.id, known.get(pr.number)?.id ?? crypto.randomUUID(), pr, null));
   }
 
   // Anything stored as open that GitHub no longer lists was merged or closed;
   // ask GitHub which, so the inbox can tell "Merged" from closed.
   const open = new Set(pulls.map((p) => p.number));
-  const gone = [...known.keys()].filter((n) => !open.has(n));
+  const closedNow = new Set(closed.map((p) => p.number));
+  const gone = [...known.keys()].filter((n) => !open.has(n) && !closedNow.has(n));
   for (const n of gone) {
     const mergedAt = await mergedAtOf(app, token, repo.full_name, n);
     await env.DB.prepare(

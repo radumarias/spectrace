@@ -12,7 +12,13 @@ function IndexState({ project }: { project: Project }) {
   const total = project.repos.length;
   const ready = project.repos.filter((r) => r.index_state === "ready").length;
   if (project.repos.some((r) => r.index_state === "failed")) {
-    return <div className="btns" style={{ gap: 6, marginTop: "auto" }}><Pill tone="bad">indexing failed</Pill></div>;
+    const reason = project.repos.find((r) => r.index_state === "failed")?.index_error;
+    return (
+      <div className="stack-s" style={{ marginTop: "auto" }}>
+        <div className="btns" style={{ gap: 6 }}><Pill tone="bad">indexing failed</Pill></div>
+        {reason && <span className="sub" style={{ fontSize: 12 }}>{reason}</span>}
+      </div>
+    );
   }
   if (ready < total) {
     return (
