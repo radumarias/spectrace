@@ -3,6 +3,10 @@ import type { components } from "./schema";
 import { api } from "./client";
 
 export type User = components["schemas"]["User"];
+export type Project = components["schemas"]["Project"];
+
+/** A repository GitHub lets the user pick (`GET /api/github/repos`, from the GitHub App installation). */
+export type GithubRepo = { id: number; full_name: string; default_branch: string };
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -10,7 +14,7 @@ export function makeQueryClient() {
   });
 }
 
-export const keys = { me: ["me"] as const };
+export const keys = { me: ["me"] as const, projects: ["projects"] as const, githubRepos: ["github-repos"] as const };
 
 /** The signed-in user, or `null` when there is no session (401). */
 export function useMe() {
@@ -32,5 +36,62 @@ export function useSignOut() {
       await api.POST("/api/auth/logout");
     },
     onSuccess: () => qc.setQueryData(keys.me, null),
+  });
+}
+
+function apiError(error: unknown, fallback: string): Error {
+  const message = (error as { error?: { message?: string } } | undefined)?.error?.message;
+  return new Error(message ?? fallback);
+}
+
+export function useProjects() {
+  return useQuery({
+    queryKey: keys.projects,
+    queryFn: async (): Promise<Project[]> => {
+      const { data, error } = await api.GET("/api/projects");
+      if (!data) throw apiError(error, "Could not load your projects.");
+      return data;
+    },
+  });
+}
+
+export type NewProject = {
+  name: string;
+  context: string;
+  repos: { full_name: string; github_repo_id?: number; default_branch?: string }[];
+};
+
+export function useCreateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: NewProject): Promise<Project> => {
+      const { data, error } = await api.POST("/api/projects", { body });
+      if (!data) throw apiError(error, "Could not create the project.");
+      return data;
+    },
+    onSuccess: (project) => {
+      qc.setQueryData<Project[]>(keys.projects, (old) => [...(old ?? []), project]);
+    },
+  });
+}
+
+/**
+ * Repos from the user's GitHub App installation, for the suggestion chips. Empty when the App is
+ * not installed or not configured: typing owner/repo or pasting a link still works.
+ * Not in the generated client until T1.2 (`/api/github/repos`) is on main; switch to `api.GET` then.
+ */
+export function useGithubRepos() {
+  return useQuery({
+    queryKey: keys.githubRepos,
+    queryFn: async (): Promise<GithubRepo[]> => {
+      try {
+        const res = await fetch("/api/github/repos");
+        if (!res.ok) return [];
+        const list = (await res.json()) as GithubRepo[];
+        return Array.isArray(list) ? list : [];
+      } catch {
+        return [];
+      }
+    },
   });
 }
