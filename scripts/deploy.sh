@@ -28,7 +28,7 @@ echo "D1 database $DB_NAME = $DB_ID"
 # 2. Apply migrations to the remote database (a temporary config carries the real id).
 sed "s/^database_id = .*/database_id = \"$DB_ID\"/" worker/wrangler.toml > worker/wrangler.deploy.toml
 trap 'rm -f worker/wrangler.deploy.toml' EXIT
-"${WRANGLER[@]}" d1 migrations apply DB --remote --config wrangler.deploy.toml
+"${WRANGLER[@]}" d1 migrations apply DB --remote --config worker/wrangler.deploy.toml
 
 # 3. Build the web app and Worker, put the real database id into the built config, deploy.
 npm --prefix web run build
