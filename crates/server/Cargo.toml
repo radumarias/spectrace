@@ -1,0 +1,18 @@
+[package]
+name = "spectrace-server"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+spectrace-core = { path = "../core" }
+axum = "0.8"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+serde_json = "1"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

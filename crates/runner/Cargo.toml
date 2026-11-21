@@ -1,0 +1,10 @@
+[package]
+name = "spectrace-runner"
+version.workspace = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+spectrace-core = { path = "../core" }
