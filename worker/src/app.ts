@@ -8,6 +8,7 @@ import { registerHealth } from "./routes/health";
 import { registerJobs } from "./routes/jobs";
 import { registerPullActions, registerPulls } from "./routes/pulls";
 import { registerProjects } from "./routes/projects";
+import { registerSpecs } from "./routes/specs";
 import { registerWebhook } from "./routes/webhook";
 
 export function createApp() {
@@ -40,6 +41,7 @@ export function createApp() {
   registerJobs(app);
   registerPulls(app);
   registerPullActions(app);
+  registerSpecs(app);
 
   app.doc("/api/openapi.json", { openapi: "3.1.0", info: { title: "spectrace API", version: "0.1.0" } });
 

@@ -226,6 +226,18 @@ describe("webhook events", () => {
     expect(events.at(-1)).toEqual(["repo.pushed", { repo: repo.fullName, branch: "main", sha: "000bbb" }]);
   });
 
+  it("re-indexes specs when the default branch is pushed, once while one is waiting", async () => {
+    const repo = await setup();
+    const indexJobs = async () =>
+      (await env.DB.prepare("SELECT target, state FROM jobs WHERE project_id = ?1 AND kind = 'index'").bind(repo.projectId).all()).results;
+    await deliver("push", pushFeature, repo);
+    expect(await indexJobs()).toEqual([]);
+    await deliver("push", pushMain, repo);
+    expect(await indexJobs()).toEqual([{ target: repo.repoId, state: "queued" }]);
+    await deliver("push", pushMain, repo, { delivery: crypto.randomUUID() });
+    expect(await indexJobs()).toHaveLength(1);
+  });
+
   it("serves the same recorded delivery twice without duplicating rows", async () => {
     const repo = await setup();
     const delivery = crypto.randomUUID();

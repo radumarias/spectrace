@@ -1,10 +1,14 @@
-// Index job, first version (T1.6): read a repository through the GitHub API,
-// with no clone, and record what is there. One job per repo; `target` is the
-// `project_repos.id`. Re-running it is safe: it only overwrites the same row.
+// Index job (T1.6, specs and anchors since T4.4): read a repository through the
+// GitHub API, with no clone, and record what is there: repo details, and the
+// specs, requirements and anchors parsed from one archive of the default branch.
+// One job per repo; `target` is the `project_repos.id`. Re-running it is safe:
+// it only overwrites the same rows.
 import type { Bindings } from "../env";
 import { AppError } from "../error";
 import { appConfigFromEnv, appJwt, ghHeaders, installationToken, linkRepoInstallation, type AppConfig } from "../github-app";
 import { log } from "../log";
+import type { RepoIndex } from "../specs";
+import { readTarGz } from "../tarball";
 import { enqueueJob, PermanentError, type JobContext, type JobRow } from "./queue";
 import { SYNC_KIND } from "./sync";
 
@@ -44,7 +48,14 @@ interface RepoRow {
   owner_id: string;
 }
 
-const STEPS = 3;
+const STEPS = 5;
+
+/** What the index keeps of the repository archive (T4.4). */
+const TAR_LIMITS = { maxFileBytes: 512 * 1024, maxTotalBytes: 48 * 1024 * 1024 };
+/** Bound parameters per anchor row; D1 allows 100 per statement. */
+const ANCHOR_COLS = 10;
+const ANCHORS_PER_INSERT = Math.floor(100 / ANCHOR_COLS);
+const MAX_ANCHORS = 5000;
 
 async function markFailed(env: Bindings, repoId: string, message: string) {
   await env.DB.prepare("UPDATE project_repos SET index_state = 'failed', index_error = ?2 WHERE id = ?1").bind(repoId, message.slice(0, 500)).run();
@@ -117,20 +128,75 @@ async function readRepo(job: JobRow, ctx: JobContext, repo: RepoRow): Promise<vo
     sha = tree.sha;
   }
 
-  await ctx.progress({ ...base, step: 3, stage: "Reading languages" });
+  let index: RepoIndex = { specs: [], anchors: [] };
+  let archiveTruncated = false;
+  if (sha) {
+    await ctx.progress({ ...base, step: 3, stage: "Reading specs, code and tests" });
+    const tar = await ghGet(app, token, `/repos/${repo.full_name}/tarball/${encodeURIComponent(info.default_branch)}`);
+    if (!tar.ok || !tar.body) throw failure("tarball", tar);
+    // Loaded here, not at the top: the WASM core is only needed by the job, and
+    // the routes (and `npm run openapi`, which runs them in Node) stay free of it.
+    const { buildIndex, wantedPath } = await import("../specs");
+    const read = await readTarGz(tar.body, wantedPath, TAR_LIMITS);
+    archiveTruncated = read.truncated;
+    await ctx.progress({ ...base, step: 4, stage: "Parsing specs and anchors" });
+    index = buildIndex(read.files);
+  }
+
+  await ctx.progress({ ...base, step: 5, stage: "Reading languages" });
   const langRes = await ghGet(app, token, `/repos/${repo.full_name}/languages`);
   if (!langRes.ok) throw failure("languages", langRes);
   const languages = (await langRes.json()) as Record<string, number>;
 
+  await storeIndex(env, repo, sha, index);
   await env.DB.prepare(
     `UPDATE project_repos SET github_repo_id = ?2, default_branch = ?3, languages = ?4, file_count = ?5,
        tree_truncated = ?6, head_sha = ?7, index_state = 'ready', index_error = NULL,
        indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE id = ?1`,
   )
-    .bind(repo.id, info.id, info.default_branch, JSON.stringify(languages), fileCount, truncated ? 1 : 0, sha)
+    .bind(repo.id, info.id, info.default_branch, JSON.stringify(languages), fileCount, truncated || archiveTruncated ? 1 : 0, sha)
     .run();
-  log("info", "repo indexed", { jobId: job.id, repo: repo.full_name, files: fileCount }, env.LOG_FORMAT);
+  log("info", "repo indexed", { jobId: job.id, repo: repo.full_name, files: fileCount, specs: index.specs.length, anchors: index.anchors.length }, env.LOG_FORMAT);
+}
+
+/** Replaces the repo's specs, edges and anchors in one transaction. A spec keeps its id while its path stays. */
+async function storeIndex(env: Bindings, repo: RepoRow, sha: string | null, index: RepoIndex): Promise<void> {
+  const { results: existing } = await env.DB.prepare("SELECT id, path FROM specs WHERE repo_id = ?1").bind(repo.id).all<{ id: string; path: string }>();
+  const idOf = new Map(existing.map((r) => [r.path, r.id]));
+  const keep = new Map(index.specs.map((s) => [s.path, idOf.get(s.path) ?? crypto.randomUUID()]));
+  const stmts: D1PreparedStatement[] = [
+    env.DB.prepare("DELETE FROM anchors WHERE repo_id = ?1").bind(repo.id),
+    env.DB.prepare("DELETE FROM spec_edges WHERE spec_id IN (SELECT id FROM specs WHERE repo_id = ?1)").bind(repo.id),
+  ];
+  for (const r of existing) if (!keep.has(r.path)) stmts.push(env.DB.prepare("DELETE FROM specs WHERE id = ?1").bind(r.id));
+  for (const s of index.specs) {
+    const id = keep.get(s.path)!;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO specs (id, project_id, repo_id, path, root, area, flow, title, source, model, diagnostics, step_count, requirement_count, tested_count, sha, indexed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         ON CONFLICT (repo_id, path) DO UPDATE SET
+           root = excluded.root, area = excluded.area, flow = excluded.flow, title = excluded.title, source = excluded.source,
+           model = excluded.model, diagnostics = excluded.diagnostics, step_count = excluded.step_count,
+           requirement_count = excluded.requirement_count, tested_count = excluded.tested_count, sha = excluded.sha, indexed_at = excluded.indexed_at`,
+      ).bind(
+        id, repo.project_id, repo.id, s.path, s.root, s.area, s.flow, s.title, s.source,
+        s.model ? JSON.stringify(s.model) : null, JSON.stringify(s.diagnostics), s.stepCount, s.requirementCount, s.testedCount, sha,
+      ),
+    );
+    for (const e of s.edges) {
+      stmts.push(env.DB.prepare("INSERT OR IGNORE INTO spec_edges (spec_id, from_node, label, to_node) VALUES (?1, ?2, ?3, ?4)").bind(id, e.from, e.label, e.to));
+    }
+  }
+  const anchors = index.anchors.slice(0, MAX_ANCHORS);
+  for (let i = 0; i < anchors.length; i += ANCHORS_PER_INSERT) {
+    const rows = anchors.slice(i, i + ANCHORS_PER_INSERT);
+    const values = rows.map((_, j) => `(${Array.from({ length: ANCHOR_COLS }, (_, k) => `?${j * ANCHOR_COLS + k + 1}`).join(", ")})`).join(", ");
+    const params = rows.flatMap((a) => [repo.id, a.specPath ? (keep.get(a.specPath) ?? null) : null, a.path, a.line, a.language, a.kind, a.class, a.target, a.note, a.excerpt]);
+    stmts.push(env.DB.prepare(`INSERT INTO anchors (repo_id, spec_id, path, line, language, kind, class, target, note, excerpt) VALUES ${values}`).bind(...params));
+  }
+  await env.DB.batch(stmts);
 }
 
 /** The job handler for kind "index". */

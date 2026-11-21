@@ -5,16 +5,19 @@ import { hashToken } from "../src/auth";
 import { forgetInstallationTokens } from "../src/github-app";
 import worker from "../src/index";
 import { JOBS_QUEUE, type JobMessage } from "../src/jobs/queue";
+import { SHOP } from "./fixtures";
+import { tarGz } from "./tar";
 
 const API = "http://api.github.test";
 
 /** Recorded-style GitHub answers for the repos the tests use. */
-const REPOS: Record<string, { installation: number; meta: object; tree: object | 409; languages: object }> = {
+const REPOS: Record<string, { installation: number; meta: object; tree: object | 409; languages: object; files?: Record<string, string> }> = {
   "acme/shop": {
     installation: 1001,
     meta: { id: 501, default_branch: "trunk", full_name: "acme/shop" },
     tree: { sha: "abc123", truncated: false, tree: [{ type: "tree" }, { type: "blob" }, { type: "blob" }, { type: "blob" }] },
     languages: { Rust: 9000, TypeScript: 1200 },
+    files: SHOP,
   },
   "acme/empty": { installation: 1001, meta: { id: 502, default_branch: "main" }, tree: 409, languages: {} },
   "acme/big": {
@@ -27,11 +30,13 @@ const REPOS: Record<string, { installation: number; meta: object; tree: object |
 };
 
 let calls: string[] = [];
+let tarballs: string[] = []; // refs whose archive was read
 let flaky = 0; // how many times the languages call should answer 502 before working
 
 function mockGithub() {
   const real = globalThis.fetch;
   calls = [];
+  tarballs = [];
   flaky = 0;
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const req = new Request(input as RequestInfo, init);
@@ -55,6 +60,10 @@ function mockGithub() {
     if (rest.startsWith("/git/trees/")) {
       expect(url.searchParams.get("recursive")).toBe("1");
       return r.tree === 409 ? Response.json({ message: "Git Repository is empty." }, { status: 409 }) : Response.json(r.tree);
+    }
+    if (rest.startsWith("/tarball/")) {
+      tarballs.push(decodeURIComponent(rest.slice("/tarball/".length)));
+      return new Response(await tarGz(r.files ?? {}), { headers: { "content-type": "application/x-gzip" } });
     }
     if (rest === "/languages") {
       if (flaky > 0) {
@@ -173,17 +182,32 @@ describe("index job", () => {
     expect((await jobsOf(project.id)).every((j) => j.state === "succeeded")).toBe(true);
   });
 
-  it("sends progress to watchers and never clones", async () => {
+  it("sends progress to watchers and reads the code from one archive, never a clone", async () => {
     const { project } = await setup(["acme/shop"]);
     const [job] = await jobsOf(project.id);
     await deliver(job!.id);
     const events = await eventNames(job!.id);
-    expect(events.map((e) => e.event)).toEqual(["queued", "started", "progress", "progress", "progress", "succeeded"]);
+    expect(events.map((e) => e.event)).toEqual(["queued", "started", "progress", "progress", "progress", "progress", "progress", "succeeded"]);
     const stages = events.filter((e) => e.event === "progress").map((e) => JSON.parse(e.data) as { step: number; steps: number; stage: string; repoId: string });
-    expect(stages.map((s) => s.stage)).toEqual(["Reading repo details", "Reading code, docs and tests", "Reading languages"]);
-    expect(stages.every((s) => s.steps === 3 && s.repoId === project.repos[0]!.id)).toBe(true);
+    expect(stages.map((s) => s.stage)).toEqual([
+      "Reading repo details",
+      "Reading code, docs and tests",
+      "Reading specs, code and tests",
+      "Parsing specs and anchors",
+      "Reading languages",
+    ]);
+    expect(stages.every((s) => s.steps === 5 && s.repoId === project.repos[0]!.id)).toBe(true);
     expect(calls.every((c) => c.startsWith("GET /repos/") || c.startsWith("POST /app/installations/"))).toBe(true);
-    expect(calls.some((c) => c.includes("clone") || c.includes("tarball") || c.includes("zipball"))).toBe(false);
+    expect(calls.some((c) => c.includes("clone") || c.includes("zipball"))).toBe(false);
+    // The default branch, once; no request per file.
+    expect(tarballs).toEqual(["trunk"]);
+    expect(calls.some((c) => c.includes("/contents/") || c.includes("/git/blobs/"))).toBe(false);
+  });
+
+  it("does not ask for an archive of a repository with no commits", async () => {
+    const { project } = await setup(["acme/empty"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    expect(tarballs).toEqual([]);
   });
 
   it("records a truncated tree", async () => {
@@ -273,5 +297,111 @@ describe("re-index", () => {
     const other = await setup([]);
     expect((await post(`/api/projects/${project.id}/reindex`, other.cookie)).status).toBe(404);
     expect((await post(`/api/projects/${project.id}/reindex`, "")).status).toBe(401);
+  });
+});
+
+interface SpecSummary {
+  id: string;
+  repo: string;
+  path: string;
+  root: string;
+  area: string;
+  flow: string;
+  title: string;
+  steps: number;
+  requirements: number;
+  tested: number;
+  errors: number;
+  edges: { from: string; label: string; to: string }[];
+}
+interface SpecDetail extends SpecSummary {
+  source: string;
+  defaultBranch: string;
+  model: { flow: string; sections: { id: string; title: string; requirements: { tag: string; condition: string }[] }[] } | null;
+  diagnostics: { code: string; line: number; message: string }[];
+  anchors: { path: string; line: number; kind: string; class: string; target: string; note: string | null; excerpt: string }[];
+}
+
+const specsOf = async (cookie: string, projectId: string) => (await (await call(`/api/projects/${projectId}/specs`, cookie)).json()) as SpecSummary[];
+
+describe("spec index", () => {
+  it("fills specs, edges and anchors from the fixture repo, and serves them", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+
+    const list = await specsOf(cookie, project.id);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ repo: "acme/shop", path: "spec/checkout.md", root: "", area: "", flow: "checkout", title: "Checkout", steps: 5, requirements: 9, errors: 0 });
+    // checkout.details has no tests on purpose: 7 of 9 requirements are tested.
+    expect(list[0]!.tested).toBe(7);
+    expect(list[0]!.edges).toContainEqual({ from: "pay", label: "declined", to: "failed" });
+    expect(list[0]!.edges).toHaveLength(5);
+
+    const res = await call(`/api/projects/${project.id}/specs/${list[0]!.id}`, cookie);
+    expect(res.status).toBe(200);
+    const spec = (await res.json()) as SpecDetail;
+    expect(spec.source).toBe(SHOP["spec/checkout.md"]);
+    expect(spec.defaultBranch).toBe("trunk");
+    expect(spec.model?.sections.map((s) => s.id)).toEqual(["checkout.cart", "checkout.details", "checkout.pay", "checkout.failed", "checkout.paid"]);
+    expect(spec.diagnostics.filter((d) => d.code.startsWith("S"))).toEqual([]);
+
+    const retry = spec.anchors.find((a) => a.target === "checkout.failed/r2");
+    expect(retry).toMatchObject({ path: "tests/checkout.rs", kind: "spec", class: "test" });
+    expect(retry!.excerpt).toContain("fn retry_limit_is_3()");
+    const pay = spec.anchors.find((a) => a.target === "checkout.pay" && a.kind === "spec");
+    expect(pay).toMatchObject({ path: "src/checkout.rs", class: "code" });
+    expect(pay!.excerpt.split("\n")[0]).toBe('#[spec("checkout.pay")]');
+    expect(pay!.excerpt.trimEnd().endsWith("}")).toBe(true);
+    const flow = spec.anchors.find((a) => a.kind === "flow" && a.target === "checkout.cart");
+    expect(flow).toMatchObject({ path: "src/cart.rs", note: "re-check stock, cache may be stale" });
+  });
+
+  it("keeps a spec's id across re-indexing, shows errors, and drops specs that are gone", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const [before] = await specsOf(cookie, project.id);
+
+    REPOS["acme/shop"]!.files = {
+      ...SHOP,
+      "spec/README.md": "# Specs\n\nNot a flow.",
+      "spec/orders/refunds.md": "# Refunds {#refunds}\n\nno diagram yet\n",
+      "docs/notes.md": "# Not a spec",
+      "node_modules/x/spec/checkout.md": SHOP["spec/checkout.md"]!,
+    };
+    try {
+      expect((await post(`/api/projects/${project.id}/reindex`, cookie)).status).toBe(200);
+      const queued = (await jobsOf(project.id)).filter((j) => j.state === "queued");
+      await deliver(...queued.map((j) => j.id));
+      const after = await specsOf(cookie, project.id);
+      expect(after.map((s) => s.path)).toEqual(["spec/checkout.md", "spec/orders/refunds.md"]);
+      expect(after[0]!.id).toBe(before!.id);
+      const refunds = after[1]!;
+      expect(refunds).toMatchObject({ area: "orders", flow: "refunds", title: "refunds", steps: 0 });
+      expect(refunds.errors).toBeGreaterThan(0);
+      const detail = (await (await call(`/api/projects/${project.id}/specs/${refunds.id}`, cookie)).json()) as SpecDetail;
+      expect(detail.model).toBeNull();
+      expect(detail.diagnostics.some((d) => d.code === "S002")).toBe(true);
+
+      REPOS["acme/shop"]!.files = { "spec/orders/refunds.md": "# Refunds {#refunds}\n" };
+      await post(`/api/projects/${project.id}/reindex`, cookie);
+      await deliver(...(await jobsOf(project.id)).filter((j) => j.state === "queued").map((j) => j.id));
+      expect((await specsOf(cookie, project.id)).map((s) => s.path)).toEqual(["spec/orders/refunds.md"]);
+      expect((await env.DB.prepare("SELECT COUNT(*) AS n FROM anchors a JOIN project_repos r ON r.id = a.repo_id WHERE r.project_id = ?1").bind(project.id).first<{ n: number }>())?.n).toBe(0);
+    } finally {
+      REPOS["acme/shop"]!.files = SHOP;
+    }
+  });
+
+  it("is only for the owner, and 404s an unknown spec", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const [spec] = await specsOf(cookie, project.id);
+    const other = await setup([]);
+    expect((await call(`/api/projects/${project.id}/specs`, other.cookie)).status).toBe(404);
+    expect((await call(`/api/projects/${project.id}/specs/${spec!.id}`, other.cookie)).status).toBe(404);
+    expect((await call(`/api/projects/${project.id}/specs`, "")).status).toBe(401);
+    expect((await call(`/api/projects/${project.id}/specs/nope`, cookie)).status).toBe(404);
+    // Another project's spec is not reachable through this project.
+    expect((await call(`/api/projects/${other.project.id}/specs/${spec!.id}`, other.cookie)).status).toBe(404);
   });
 });
