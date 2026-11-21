@@ -3,7 +3,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["node_modules", ".wrangler", "dist"] },
+  { ignores: ["node_modules", ".wrangler", "dist", "src/wasm"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

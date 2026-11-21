@@ -52,6 +52,22 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-bindgen CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.130
+
+      - name: Build crates/core to WASM
+        run: scripts/build-wasm.sh
+
       - name: Install dependencies
         run: npm --prefix web ci --no-audit --no-fund
 
@@ -83,6 +99,22 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: worker/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-bindgen CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.130
+
+      - name: Build crates/core to WASM
+        run: scripts/build-wasm.sh
 
       - name: Install dependencies
         run: npm --prefix worker ci --no-audit --no-fund

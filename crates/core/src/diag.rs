@@ -6,6 +6,7 @@
 use std::fmt;
 
 /// Whether a diagnostic blocks the tools that read the spec.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
     /// The spec is unusable until this is fixed.
@@ -24,6 +25,7 @@ impl fmt::Display for Severity {
 }
 
 /// A diagnostic code from the spec format doc.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Code {
     /// No title line, more than one H1, or the title id is missing or does not match the file name.
@@ -100,6 +102,7 @@ impl fmt::Display for Code {
 }
 
 /// One problem found in a file, at a 1-based line.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     pub code: Code,
