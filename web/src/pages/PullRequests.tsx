@@ -3,6 +3,7 @@ import { Link, Navigate } from "react-router-dom";
 import { usePulls, useSyncPulls, type Pull, type PullFilter } from "../api/pulls";
 import { useCurrentProject } from "../api/queries";
 import { IndexBanner } from "../ui/IndexBanner";
+import { IndexFailed } from "../ui/IndexFailed";
 import { Button, Pill, type PillTone } from "../ui/parts";
 import { useToast } from "../ui/Toast";
 
@@ -90,6 +91,7 @@ export function PullRequests() {
         </Button>
       </div>
       {indexing && <IndexBanner project={project} />}
+      <IndexFailed project={project} />
       <div className="btns" style={{ justifyContent: "space-between" }}>
         <div className="seg" role="group" aria-label="Filter">
           {TABS.map((t) => (

@@ -16,6 +16,8 @@ export const SYNC_KIND = "sync";
 const PAGE_SIZE = 100;
 /** GitHub stops listing a PR's files after 3000. */
 const MAX_FILE_PAGES = 30;
+/** How many pages (of 100) of recently closed PRs a sync reads. */
+const RECENT_CLOSED_PAGES = 1;
 
 interface RepoRow {
   id: string;
@@ -93,10 +95,18 @@ async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: 
     await progress(pr.number);
   }
 
+  // Recently closed PRs, so merged ones show up even if we never saw them open. The list endpoint carries
+  // `merged_at`; files are not read for these.
+  const closed = await ghPages<GhPull>(app, token, `closed pulls of ${repo.full_name}`, `/repos/${repo.full_name}/pulls?state=closed&sort=updated&direction=desc`, RECENT_CLOSED_PAGES);
+  for (const pr of closed) {
+    await env.DB.batch(pullStatements(env, repo.id, known.get(pr.number)?.id ?? crypto.randomUUID(), pr, null));
+  }
+
   // Anything stored as open that GitHub no longer lists was merged or closed;
   // ask GitHub which, so the inbox can tell "Merged" from closed.
   const open = new Set(pulls.map((p) => p.number));
-  const gone = [...known.keys()].filter((n) => !open.has(n));
+  const closedNow = new Set(closed.map((p) => p.number));
+  const gone = [...known.keys()].filter((n) => !open.has(n) && !closedNow.has(n));
   for (const n of gone) {
     const mergedAt = await mergedAtOf(app, token, repo.full_name, n);
     await env.DB.prepare(

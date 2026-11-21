@@ -17,6 +17,8 @@ let files: Record<number, unknown[]>;
 let requests: string[];
 /** Pull requests no longer open on GitHub, by number (what `GET /pulls/{n}` answers). */
 let closed: Record<number, { merged_at: string | null }>;
+/** What `GET /pulls?state=closed` lists: recently closed pull requests, merged ones with `merged_at`. */
+let closedList: unknown[] = [];
 
 function mockGithub() {
   requests = [];
@@ -33,7 +35,7 @@ function mockGithub() {
     if (req.headers.get("authorization") !== "Bearer ghs_test") return Response.json({}, { status: 401 });
     const page = Number(url.searchParams.get("page") ?? "1");
     const slice = (all: unknown[]) => all.slice((page - 1) * 100, page * 100);
-    if (path === "/repos/acme/shop/pulls") return Response.json(slice(pulls));
+    if (path === "/repos/acme/shop/pulls") return Response.json(slice(url.searchParams.get("state") === "closed" ? closedList : pulls));
     const f = /^\/repos\/acme\/shop\/pulls\/(\d+)\/files$/.exec(path);
     if (f) return Response.json(slice(files[Number(f[1])] ?? []));
     const d = /^\/repos\/acme\/shop\/pulls\/(\d+)$/.exec(path);
@@ -86,12 +88,27 @@ beforeEach(() => {
   forgetInstallationTokens();
   pulls = structuredClone(pullsOpen);
   closed = {};
+  closedList = [];
   files = { 7: structuredClone(files7), 9: structuredClone(files9) };
   mockGithub();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("sync job", () => {
+  it("stores recently merged and closed pull requests that were never seen open", async () => {
+    const { projectId, repoId } = await setup();
+    const base = pullsOpen[0]!;
+    closedList = [
+      { ...base, number: 3, id: 303, title: "Shipped", state: "closed", merged_at: "2026-11-20T10:00:00Z" },
+      { ...base, number: 4, id: 304, title: "Dropped", state: "closed", merged_at: null },
+    ];
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    expect((await env.DB.prepare("SELECT number, state, merged_at FROM pull_requests WHERE repo_id = ?1 AND number IN (3, 4) ORDER BY number").bind(repoId).all()).results).toEqual([
+      { number: 3, state: "closed", merged_at: "2026-11-20T10:00:00Z" },
+      { number: 4, state: "closed", merged_at: null },
+    ]);
+  });
+
   it("stores the open pull requests and their files", async () => {
     const { projectId, repoId } = await setup();
     expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });

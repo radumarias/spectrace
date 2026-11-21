@@ -4,7 +4,7 @@ export type NavItem = { id: IconName; label: string; badge?: number };
 
 /** Sidebar groups, in the prototype's order. */
 export const GROUPS: { title: string; items: NavItem[] }[] = [
-  { title: "Work", items: [{ id: "home", label: "Home" }, { id: "prs", label: "Pull requests" }, { id: "map", label: "App map" }, { id: "spec", label: "Spec · checkout" }] },
+  { title: "Work", items: [{ id: "home", label: "Home" }, { id: "prs", label: "Pull requests" }, { id: "map", label: "App map" }, { id: "spec", label: "Spec" }] },
   { title: "Quality", items: [{ id: "agents", label: "Agents" }, { id: "risk", label: "Coverage + risk" }] },
   { title: "Setup", items: [{ id: "project", label: "Project settings" }, { id: "runners", label: "Runners" }, { id: "talk", label: "Talk" }] },
 ];
@@ -27,7 +27,7 @@ export const TITLES: Record<string, string> = {
   home: "Home",
   prs: "Pull requests",
   map: "App map",
-  spec: "Spec · checkout",
+  spec: "Spec",
   agents: "Agents",
   risk: "Coverage + risk",
   project: "Project settings",
