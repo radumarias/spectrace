@@ -67,7 +67,9 @@ jobs:
         run: npm --prefix web test
 
       - name: Build (web app plus Worker, as deployed)
-        run: npm --prefix web run build
+        run: |
+          npm --prefix worker ci --no-audit --no-fund
+          npm --prefix web run build
 
   worker:
     name: Worker (tsc, eslint, vitest)
