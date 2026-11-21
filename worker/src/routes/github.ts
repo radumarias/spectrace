@@ -3,7 +3,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppEnv } from "../env";
 import { AppError, ErrorBody } from "../error";
 import { clearCookie, cookieOptions, getCookie, githubConfig, randomToken, requireUser, setCookie, STATE_MAX_AGE_SECS } from "../auth";
-import { appConfig, ghHeaders, installationToken, type AppConfig } from "../github-app";
+import { appConfig, ghJson, userRepos } from "../github-app";
 
 const INSTALL_STATE_COOKIE = "spectrace_install_state";
 const PAGE_SIZE = 100;
@@ -20,7 +20,6 @@ const RepoSchema = z
     html_url: z.string(),
   })
   .openapi("GithubRepo");
-type Repo = z.infer<typeof RepoSchema>;
 
 const err = (description: string) => ({ description, content: { "application/json": { schema: ErrorBody } } });
 
@@ -62,43 +61,10 @@ const reposRoute = createRoute({
   },
 });
 
-async function ghJson<T>(what: string, url: string, token: string): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(url, { headers: ghHeaders(token) });
-  } catch (cause) {
-    throw new AppError("upstream", `GitHub ${what}: ${String(cause)}`, { cause });
-  }
-  if (!res.ok) throw new AppError("upstream", `GitHub ${what}: status ${res.status}`);
-  return (await res.json()) as T;
-}
-
 interface GhInstallation {
   id: number;
   repository_selection: string;
   account: { id: number; login: string; type: string };
-}
-
-async function installationRepos(app: AppConfig, installationId: number, token: string): Promise<Repo[]> {
-  const out: Repo[] = [];
-  for (let page = 1; ; page++) {
-    const batch = await ghJson<{
-      repositories: { id: number; name: string; full_name: string; private: boolean; default_branch: string; html_url: string; owner: { login: string } }[];
-    }>("repositories request", `${app.apiUrl}/installation/repositories?per_page=${PAGE_SIZE}&page=${page}`, token);
-    for (const r of batch.repositories) {
-      out.push({
-        id: r.id,
-        installation_id: installationId,
-        owner: r.owner.login,
-        name: r.name,
-        full_name: r.full_name,
-        private: r.private,
-        default_branch: r.default_branch,
-        html_url: r.html_url,
-      });
-    }
-    if (batch.repositories.length < PAGE_SIZE) return out;
-  }
 }
 
 export function registerGithub(app: OpenAPIHono<AppEnv>) {
@@ -177,21 +143,7 @@ export function registerGithub(app: OpenAPIHono<AppEnv>) {
   app.openapi(reposRoute, async (c) => {
     const user = await requireUser(c);
     const cfg = appConfig(c);
-    const { results } = await c.env.DB.prepare("SELECT installation_id FROM user_installations WHERE user_id = ?1 ORDER BY installation_id")
-      .bind(user.id)
-      .all<{ installation_id: number }>();
-
-    const repos: Repo[] = [];
-    for (const { installation_id } of results) {
-      const token = await installationToken(cfg, installation_id);
-      if (!token) {
-        // GitHub no longer knows this installation (uninstalled): forget it.
-        await c.env.DB.prepare("DELETE FROM github_installations WHERE id = ?1").bind(installation_id).run();
-        continue;
-      }
-      repos.push(...(await installationRepos(cfg, installation_id, token)));
-    }
-    repos.sort((a, b) => (a.full_name < b.full_name ? -1 : a.full_name > b.full_name ? 1 : 0));
+    const repos = await userRepos(cfg, c.env.DB, user.id);
     return c.json(repos, 200);
   });
 }

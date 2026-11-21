@@ -98,6 +98,75 @@ export async function installationToken(app: AppConfig, installationId: number):
   return body.token;
 }
 
+export async function ghJson<T>(what: string, url: string, token: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { headers: ghHeaders(token) });
+  } catch (cause) {
+    throw new AppError("upstream", `GitHub ${what}: ${String(cause)}`, { cause });
+  }
+  if (!res.ok) throw new AppError("upstream", `GitHub ${what}: status ${res.status}`);
+  return (await res.json()) as T;
+}
+
+const PAGE_SIZE = 100;
+
+/** A repository an installation of the App can reach. */
+export interface InstalledRepo {
+  id: number;
+  installation_id: number;
+  owner: string;
+  name: string;
+  full_name: string;
+  private: boolean;
+  default_branch: string;
+  html_url: string;
+}
+
+async function installationRepos(app: AppConfig, installationId: number, token: string): Promise<InstalledRepo[]> {
+  const out: InstalledRepo[] = [];
+  for (let page = 1; ; page++) {
+    const batch = await ghJson<{
+      repositories: { id: number; name: string; full_name: string; private: boolean; default_branch: string; html_url: string; owner: { login: string } }[];
+    }>("repositories request", `${app.apiUrl}/installation/repositories?per_page=${PAGE_SIZE}&page=${page}`, token);
+    for (const r of batch.repositories) {
+      out.push({
+        id: r.id,
+        installation_id: installationId,
+        owner: r.owner.login,
+        name: r.name,
+        full_name: r.full_name,
+        private: r.private,
+        default_branch: r.default_branch,
+        html_url: r.html_url,
+      });
+    }
+    if (batch.repositories.length < PAGE_SIZE) return out;
+  }
+}
+
+/**
+ * Every repository the user's installations can reach, sorted by full name. An installation GitHub no
+ * longer knows (uninstalled) is forgotten on the way.
+ */
+export async function userRepos(app: AppConfig, db: D1Database, userId: string): Promise<InstalledRepo[]> {
+  const { results } = await db
+    .prepare("SELECT installation_id FROM user_installations WHERE user_id = ?1 ORDER BY installation_id")
+    .bind(userId)
+    .all<{ installation_id: number }>();
+  const repos: InstalledRepo[] = [];
+  for (const { installation_id } of results) {
+    const token = await installationToken(app, installation_id);
+    if (!token) {
+      await db.prepare("DELETE FROM github_installations WHERE id = ?1").bind(installation_id).run();
+      continue;
+    }
+    repos.push(...(await installationRepos(app, installation_id, token)));
+  }
+  repos.sort((a, b) => (a.full_name < b.full_name ? -1 : a.full_name > b.full_name ? 1 : 0));
+  return repos;
+}
+
 export function forgetInstallationTokens() {
   tokenCache.clear();
 }
