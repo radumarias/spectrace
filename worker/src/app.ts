@@ -1,4 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { registerDevpage } from "./devpage";
 import type { AppEnv } from "./env";
 import { AppError, errorResponse } from "./error";
 import { log } from "./log";
@@ -42,6 +43,7 @@ export function createApp() {
   registerPulls(app);
   registerPullActions(app);
   registerSpecs(app);
+  registerDevpage(app);
 
   app.doc("/api/openapi.json", { openapi: "3.1.0", info: { title: "spectrace API", version: "0.1.0" } });
 

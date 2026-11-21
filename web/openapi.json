@@ -691,6 +691,28 @@
                 "items": {
                   "$ref": "#/components/schemas/SpecAnchor"
                 }
+              },
+              "devpage": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "integer"
+                  },
+                  "url": {
+                    "type": "string",
+                    "example": "/d/6f1c2a9e-0000-4000-8000-000000000000/"
+                  }
+                },
+                "required": [
+                  "id",
+                  "version",
+                  "url"
+                ],
+                "description": "The spec as devpage server renders it, on this origin; null while devpage is off or has not published it."
               }
             },
             "required": [
@@ -699,7 +721,8 @@
               "defaultBranch",
               "model",
               "diagnostics",
-              "anchors"
+              "anchors",
+              "devpage"
             ]
           }
         ]

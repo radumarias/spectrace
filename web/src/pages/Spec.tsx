@@ -289,11 +289,12 @@ export function SpecPage() {
   const want = params.get("step");
   const step = steps.find((s) => s.node === want) ?? steps.find((s) => s.status !== "ok") ?? steps[0];
 
-  const set = (k: "tab" | "step", v: string) =>
+  const set = (k: "tab" | "step" | "md", v: string | null) =>
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
-        n.set(k, v);
+        if (v === null) n.delete(k);
+        else n.set(k, v);
         return n;
       },
       { replace: true },
@@ -330,10 +331,30 @@ export function SpecPage() {
       </div>
     );
   } else if (tab === "md") {
+    // devpage server renders the spec when it runs here; the requirement view is spectrace's own, with test status and step selection.
+    const page = spec.devpage && params.get("md") !== "status" ? spec.devpage : null;
     body = (
       <>
-        <span className="lbl">{spec.path} · rendered by devpage</span>
-        <SpecMarkdown source={spec.source} steps={steps} selected={step?.node ?? null} onSelect={select} status={status} />
+        <div className="btns" style={{ justifyContent: "space-between" }}>
+          <span className="lbl">
+            {spec.path} · {page ? `rendered by devpage · version ${page.version}` : spec.devpage ? "requirement status" : "rendered by spectrace, devpage is off here"}
+          </span>
+          {spec.devpage && (
+            <div className="seg" role="group" aria-label="Markdown view">
+              <button type="button" className={page ? "on" : ""} aria-pressed={!!page} onClick={() => set("md", null)}>
+                devpage
+              </button>
+              <button type="button" className={page ? "" : "on"} aria-pressed={!page} onClick={() => set("md", "status")}>
+                Requirement status
+              </button>
+            </div>
+          )}
+        </div>
+        {page ? (
+          <iframe className="devpage-frame" src={page.url} title={`${spec.title} spec, rendered by devpage`} />
+        ) : (
+          <SpecMarkdown source={spec.source} steps={steps} selected={step?.node ?? null} onSelect={select} status={status} />
+        )}
       </>
     );
   } else if (tab === "code" && step) {
