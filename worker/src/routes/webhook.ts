@@ -14,6 +14,7 @@ import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppEnv, Bindings } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { enqueueIndex, INDEX_KIND } from "../jobs/index-repo";
 import { emit, enqueueJob } from "../jobs/queue";
 import { SYNC_KIND } from "../jobs/sync";
 import { log } from "../log";
@@ -53,6 +54,7 @@ interface RepoRow {
   id: string;
   project_id: string;
   full_name: string;
+  default_branch: string;
 }
 
 /** What changed, as a live event for the project. */
@@ -87,6 +89,19 @@ async function requestSync(env: Bindings, repo: RepoRow): Promise<void> {
   } catch (error) {
     // The PR row is already updated; a manual sync catches up. Do not make GitHub redeliver over it.
     log("warn", "webhook could not queue a sync", { repo: repo.full_name, error: String(error) }, env.LOG_FORMAT);
+  }
+}
+
+/** One waiting index job per repo is enough: it reads the branch as it is when it runs. */
+async function requestIndex(env: Bindings, repo: RepoRow): Promise<void> {
+  const waiting = await env.DB.prepare("SELECT 1 AS x FROM jobs WHERE project_id = ?1 AND kind = ?2 AND target = ?3 AND state = 'queued' LIMIT 1")
+    .bind(repo.project_id, INDEX_KIND, repo.id)
+    .first();
+  if (waiting) return;
+  try {
+    await enqueueIndex(env, repo.project_id, repo.id);
+  } catch (error) {
+    log("warn", "webhook could not queue an index", { repo: repo.full_name, error: String(error) }, env.LOG_FORMAT);
   }
 }
 
@@ -163,6 +178,8 @@ async function onPush(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[
     .all<{ number: number }>();
   if (results.length > 0) await requestSync(env, repo);
   for (const { number } of results) changes.push(prChange(repo, number, "push"));
+  // Specs and anchors are read from the default branch: a push there re-indexes the repo (T4.4).
+  if (branch === repo.default_branch) await requestIndex(env, repo);
   return changes;
 }
 
@@ -214,7 +231,7 @@ export function registerWebhook(app: OpenAPIHono<AppEnv>) {
 
     const fullName = payload.repository?.full_name;
     const { results: repos } = fullName
-      ? await c.env.DB.prepare("SELECT id, project_id, full_name FROM project_repos WHERE full_name = ?1").bind(fullName).all<RepoRow>()
+      ? await c.env.DB.prepare("SELECT id, project_id, full_name, default_branch FROM project_repos WHERE full_name = ?1").bind(fullName).all<RepoRow>()
       : { results: [] as RepoRow[] };
 
     let handled = false;

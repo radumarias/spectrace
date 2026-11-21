@@ -1717,6 +1717,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/specs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Specs of a project's repos, by repo and path */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Specs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpecSummary"][];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/specs/{specId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One spec: source, parsed model, diagnostics and the code and tests anchored to it */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    specId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The spec */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpecDetail"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or spec */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1867,6 +1980,136 @@ export interface components {
             headSha: string;
             githubReviewId: number | null;
             createdAt: string;
+        };
+        SpecSummary: {
+            id: string;
+            /** @example acme/shop */
+            repo: string;
+            /** @example spec/checkout.md */
+            path: string;
+            /** @description Folder holding the `spec` folder, '' at the top of the repo. */
+            root: string;
+            /** @description Folders between `spec/` and the file, '' when flat. */
+            area: string;
+            /** @example checkout */
+            flow: string;
+            title: string;
+            steps: number;
+            requirements: number;
+            /** @description Requirements with at least one test anchored to them or to their step. */
+            tested: number;
+            errors: number;
+            edges: {
+                from: string;
+                label: string;
+                to: string;
+            }[];
+            indexedAt: string;
+        };
+        SpecDetail: components["schemas"]["SpecSummary"] & {
+            source: string;
+            sha: string | null;
+            defaultBranch: string;
+            model: components["schemas"]["SpecModel"];
+            diagnostics: components["schemas"]["SpecDiagnostic"][];
+            anchors: components["schemas"]["SpecAnchor"][];
+        };
+        /** @description Null when the file has errors; see diagnostics. */
+        SpecModel: {
+            flow: string;
+            title: {
+                text: string;
+                id: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            } | null;
+            diagram: components["schemas"]["SpecDiagram"];
+            sections: components["schemas"]["SpecSection"][];
+            head: components["schemas"]["SpecSpan"];
+        } | null;
+        SpecSpan: {
+            start: number;
+            end: number;
+        };
+        SpecDiagram: {
+            /** @enum {string|null} */
+            direction: "LR" | "RL" | "TD" | "TB" | "BT" | null;
+            line: number;
+            span: components["schemas"]["SpecSpan"];
+            body: components["schemas"]["SpecSpan"];
+            header: {
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            } | null;
+            nodes: {
+                id: string;
+                label: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+            edges: {
+                from: string;
+                label: string;
+                to: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+            clicks: {
+                node: string;
+                target: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+            comments: {
+                text: string;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
+        } | null;
+        SpecSection: {
+            /** @example checkout.failed */
+            id: string;
+            node: string;
+            title: string;
+            line: number;
+            heading: components["schemas"]["SpecSpan"];
+            span: components["schemas"]["SpecSpan"];
+            requirements: components["schemas"]["SpecRequirement"][];
+            flow: {
+                text: string;
+                line: number;
+                end_line: number;
+                span: components["schemas"]["SpecSpan"];
+            } | null;
+        };
+        SpecRequirement: {
+            tag: string;
+            condition: string;
+            response: string;
+            line: number;
+            end_line: number;
+            span: components["schemas"]["SpecSpan"];
+        };
+        SpecDiagnostic: {
+            /** @example S008 */
+            code: string;
+            file: string;
+            line: number;
+            message: string;
+        };
+        SpecAnchor: {
+            path: string;
+            line: number;
+            /** @enum {string} */
+            language: "rust" | "typescript" | "python";
+            /** @enum {string} */
+            kind: "spec" | "flow";
+            /** @enum {string} */
+            class: "code" | "test";
+            /** @example checkout.failed/r2 */
+            target: string;
+            note: string | null;
+            excerpt: string;
         };
     };
     responses: never;

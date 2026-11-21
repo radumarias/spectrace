@@ -574,6 +574,534 @@
           "githubReviewId",
           "createdAt"
         ]
+      },
+      "SpecSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string",
+            "example": "acme/shop"
+          },
+          "path": {
+            "type": "string",
+            "example": "spec/checkout.md"
+          },
+          "root": {
+            "type": "string",
+            "description": "Folder holding the `spec` folder, '' at the top of the repo."
+          },
+          "area": {
+            "type": "string",
+            "description": "Folders between `spec/` and the file, '' when flat."
+          },
+          "flow": {
+            "type": "string",
+            "example": "checkout"
+          },
+          "title": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "integer"
+          },
+          "requirements": {
+            "type": "integer"
+          },
+          "tested": {
+            "type": "integer",
+            "description": "Requirements with at least one test anchored to them or to their step."
+          },
+          "errors": {
+            "type": "integer"
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "from",
+                "label",
+                "to"
+              ]
+            }
+          },
+          "indexedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "repo",
+          "path",
+          "root",
+          "area",
+          "flow",
+          "title",
+          "steps",
+          "requirements",
+          "tested",
+          "errors",
+          "edges",
+          "indexedAt"
+        ]
+      },
+      "SpecDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SpecSummary"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "sha": {
+                "type": "string",
+                "nullable": true
+              },
+              "defaultBranch": {
+                "type": "string"
+              },
+              "model": {
+                "$ref": "#/components/schemas/SpecModel"
+              },
+              "diagnostics": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SpecDiagnostic"
+                }
+              },
+              "anchors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SpecAnchor"
+                }
+              }
+            },
+            "required": [
+              "source",
+              "sha",
+              "defaultBranch",
+              "model",
+              "diagnostics",
+              "anchors"
+            ]
+          }
+        ]
+      },
+      "SpecModel": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "flow": {
+            "type": "string"
+          },
+          "title": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "span": {
+                "$ref": "#/components/schemas/SpecSpan"
+              }
+            },
+            "required": [
+              "text",
+              "id",
+              "line",
+              "span"
+            ]
+          },
+          "diagram": {
+            "$ref": "#/components/schemas/SpecDiagram"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpecSection"
+            }
+          },
+          "head": {
+            "$ref": "#/components/schemas/SpecSpan"
+          }
+        },
+        "required": [
+          "flow",
+          "title",
+          "diagram",
+          "sections",
+          "head"
+        ],
+        "description": "Null when the file has errors; see diagnostics."
+      },
+      "SpecSpan": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "integer"
+          },
+          "end": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ]
+      },
+      "SpecDiagram": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "direction": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "LR",
+              "RL",
+              "TD",
+              "TB",
+              "BT",
+              null
+            ]
+          },
+          "line": {
+            "type": "integer"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "body": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "header": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "line": {
+                "type": "integer"
+              },
+              "span": {
+                "$ref": "#/components/schemas/SpecSpan"
+              }
+            },
+            "required": [
+              "line",
+              "span"
+            ]
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "line",
+                "span"
+              ]
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "from",
+                "label",
+                "to",
+                "line",
+                "span"
+              ]
+            }
+          },
+          "clicks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "node",
+                "target",
+                "line",
+                "span"
+              ]
+            }
+          },
+          "comments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "text",
+                "line",
+                "span"
+              ]
+            }
+          }
+        },
+        "required": [
+          "direction",
+          "line",
+          "span",
+          "body",
+          "header",
+          "nodes",
+          "edges",
+          "clicks",
+          "comments"
+        ]
+      },
+      "SpecSection": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "checkout.failed"
+          },
+          "node": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "heading": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SpecSpan"
+          },
+          "requirements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpecRequirement"
+            }
+          },
+          "flow": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer"
+              },
+              "end_line": {
+                "type": "integer"
+              },
+              "span": {
+                "$ref": "#/components/schemas/SpecSpan"
+              }
+            },
+            "required": [
+              "text",
+              "line",
+              "end_line",
+              "span"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "node",
+          "title",
+          "line",
+          "heading",
+          "span",
+          "requirements",
+          "flow"
+        ]
+      },
+      "SpecRequirement": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string"
+          },
+          "condition": {
+            "type": "string"
+          },
+          "response": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "end_line": {
+            "type": "integer"
+          },
+          "span": {
+            "$ref": "#/components/schemas/SpecSpan"
+          }
+        },
+        "required": [
+          "tag",
+          "condition",
+          "response",
+          "line",
+          "end_line",
+          "span"
+        ]
+      },
+      "SpecDiagnostic": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "S008"
+          },
+          "file": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "file",
+          "line",
+          "message"
+        ]
+      },
+      "SpecAnchor": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "rust",
+              "typescript",
+              "python"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "spec",
+              "flow"
+            ]
+          },
+          "class": {
+            "type": "string",
+            "enum": [
+              "code",
+              "test"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "example": "checkout.failed/r2"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "excerpt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "line",
+          "language",
+          "kind",
+          "class",
+          "target",
+          "note",
+          "excerpt"
+        ]
       }
     },
     "parameters": {}
@@ -2313,6 +2841,114 @@
           },
           "502": {
             "description": "GitHub could not be reached or refused the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/specs": {
+      "get": {
+        "summary": "Specs of a project's repos, by repo and path",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Specs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpecSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/specs/{specId}": {
+      "get": {
+        "summary": "One spec: source, parsed model, diagnostics and the code and tests anchored to it",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or spec",
             "content": {
               "application/json": {
                 "schema": {

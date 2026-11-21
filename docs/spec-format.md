@@ -10,7 +10,7 @@ The worked example is [`fixtures/shop/spec/checkout.md`](../fixtures/shop/spec/c
 
 These are the choices the rest of the work builds on. Everything below follows from them.
 
-1. **One file per flow, in `spec/`.** `spec/checkout.md` is the flow `checkout`. The file name is the flow id. The folder is flat in v1. Grouping flows into areas (Storefront, Orders) is the app map's job and is left for a later task.
+1. **One file per flow, in `spec/`.** `spec/checkout.md` is the flow `checkout`. The file name is the flow id. Subfolders group flows into areas for the app map (`spec/storefront/checkout.md` is the flow `checkout` in the area `storefront`). The index reads every `spec/` folder of a repo, so `fixtures/shop/spec/checkout.md` is a spec too; a Markdown file whose name is not an id (`README.md`) is prose and is skipped.
 2. **Ids are dotted paths.** A step is `checkout.failed`, a requirement is `checkout.failed/r2`. Ids are lowercase `snake_case`, never reused, and never derived from titles, so renaming a title changes nothing downstream.
 3. **The Mermaid diagram and the headings both carry the step id.** The diagram uses the short id (`failed`), the heading carries the full id (`{#checkout.failed}`). They are checked against each other, so a mismatch is an error, not a guess.
 4. **The Mermaid is a strict subset.** Only labelled nodes, labelled edges, `click` links and comments. Anything else is an error. This is what lets the diagram editor write the file back without losing anything.
