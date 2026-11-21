@@ -23,6 +23,8 @@ export default defineConfig(async () => {
             GITHUB_APP_SLUG: "spectrace-test",
             GITHUB_APP_PRIVATE_KEY: TEST_APP_PRIVATE_KEY,
             GITHUB_WEBHOOK_SECRET: "whsec-test",
+            // Claude is faked in test/ai.test.ts, never called.
+            ANTHROPIC_BASE_URL: "http://anthropic.test",
             // devpage server is faked in test/index-job.test.ts, never run.
             DEVPAGE_ORIGIN: "http://devpage.test",
           },

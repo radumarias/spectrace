@@ -3,6 +3,7 @@ import { registerDevpage } from "./devpage";
 import type { AppEnv } from "./env";
 import { AppError, errorResponse } from "./error";
 import { log } from "./log";
+import { registerAi } from "./routes/ai";
 import { registerAuth } from "./routes/auth";
 import { registerGithub } from "./routes/github";
 import { registerHealth } from "./routes/health";
@@ -35,6 +36,7 @@ export function createApp() {
   });
 
   registerHealth(app);
+  registerAi(app);
   registerAuth(app);
   registerGithub(app);
   registerWebhook(app);
