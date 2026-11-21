@@ -115,3 +115,6 @@ figcaption{font:400 10px var(--f-mono);color:var(--muted)}
 .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;font:500 12px var(--f-mono)}
 .crumbs span{color:var(--muted)}
 
+
+/* pull request detail */
+.pr-body{white-space:pre-wrap;overflow-wrap:anywhere}
