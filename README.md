@@ -21,3 +21,7 @@ just migrate  # apply new D1 migrations to the local database
 ```
 
 Worker settings are bindings and variables in `worker/wrangler.toml`. Secrets for local work go in `worker/.dev.vars` (git-ignored), for example `GITHUB_CLIENT_SECRET=...` once sign-in is ported (T0.8).
+
+## Deploy
+
+`just deploy` publishes to Cloudflare. Setup and what it does: [docs/deploy.md](docs/deploy.md).

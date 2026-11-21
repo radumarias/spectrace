@@ -3,3 +3,4 @@ node_modules
 web/dist
 .env
 .wrangler
+worker/wrangler.deploy.toml
