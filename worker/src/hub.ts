@@ -1,16 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Bindings } from "./env";
+import { toEvent, type EventRow, type JobEvent } from "./events";
 import { log } from "./log";
-
-/** One row of `job_events`, as sent to browsers. */
-export interface JobEvent {
-  id: number;
-  projectId: string;
-  jobId: string;
-  event: string;
-  data: Record<string, unknown>;
-  createdAt: string;
-}
 
 const REPLAY_LIMIT = 500;
 
@@ -67,24 +58,4 @@ export class ProjectHub extends DurableObject<Bindings> {
   override webSocketClose(ws: WebSocket, code: number, reason: string): void {
     ws.close(code === 1005 ? 1000 : code, reason);
   }
-}
-
-export interface EventRow {
-  id: number;
-  project_id: string;
-  job_id: string;
-  event: string;
-  data: string;
-  created_at: string;
-}
-
-export function toEvent(row: EventRow): JobEvent {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    jobId: row.job_id,
-    event: row.event,
-    data: JSON.parse(row.data) as Record<string, unknown>,
-    createdAt: row.created_at,
-  };
 }
