@@ -479,3 +479,116 @@ fn diagnostics_name_file_line_and_code() {
         "spec/checkout.md:13: error S005: edge has no label, write `a -->|label| b`"
     );
 }
+
+// ---- Action clicks.
+
+const ACTION_COPY: &str =
+    "click pay href \"action:copy?text=cargo%20test%20pay\" \"Copy the test command\"";
+const ACTION_TOGGLE: &str = "click paid href \"action:toggle?class=checked\" \"Mark as done\"";
+const ACTION_SHOW: &str = "click failed href \"action:show?id=retry-notes\"";
+
+/// The checkout fixture with the `click` lines of pay, paid and failed replaced.
+fn actions_src(pay: &str, paid: &str, failed: &str) -> String {
+    CHECKOUT
+        .replacen("click pay href \"spec://checkout.pay\"", pay, 1)
+        .replacen("click paid href \"spec://checkout.paid\"", paid, 1)
+        .replacen("click failed href \"spec://checkout.failed\"", failed, 1)
+}
+
+fn with_actions(pay: &str, paid: &str, failed: &str) -> Parsed {
+    let p = parse(PATH, &actions_src(pay, paid, failed));
+    for d in &p.diagnostics {
+        println!("{d}");
+    }
+    p
+}
+
+#[test]
+fn parses_action_clicks_with_and_without_tooltip() {
+    let p = with_actions(ACTION_COPY, ACTION_TOGGLE, ACTION_SHOW);
+    assert!(!p.has_errors(), "{:#?}", p.diagnostics);
+    let d = p.spec.diagram.as_ref().unwrap();
+    assert_eq!(d.clicks.len(), 2);
+    let a = &d.actions;
+    assert_eq!(a.len(), 3);
+    assert_eq!(a[0].node, "pay");
+    assert_eq!(a[0].name, "copy");
+    assert_eq!(a[0].href, "action:copy?text=cargo%20test%20pay");
+    assert_eq!(a[0].tooltip.as_deref(), Some("Copy the test command"));
+    assert_eq!(a[0].line, 19);
+    assert_eq!(a[1].name, "toggle");
+    assert_eq!(a[1].href, "action:toggle?class=checked");
+    assert_eq!(a[1].tooltip.as_deref(), Some("Mark as done"));
+    assert_eq!(a[2].node, "failed");
+    assert_eq!(a[2].name, "show");
+    assert_eq!(a[2].tooltip, None);
+    assert_eq!(
+        a[2].span
+            .slice(&actions_src(ACTION_COPY, ACTION_TOGGLE, ACTION_SHOW)),
+        format!("  {ACTION_SHOW}")
+    );
+}
+
+#[test]
+fn rejects_malformed_action_clicks() {
+    for bad in [
+        "click pay href \"action:\"",
+        "click pay href \"action:?text=x\"",
+        "click pay href \"action:Bad\"",
+        "click pay href \"action:1bad\"",
+        "click pay href \"action:copy?text=a b\"",
+        "click pay href \"action:copy\" \"\"",
+        "click pay href \"action:copy\" \"a\"b\"",
+        "click pay href \"action:copy\" Copy it",
+        "click  pay href \"action:copy\"",
+        "click pay  href \"action:copy\"",
+        "click pay href  \"action:copy\"",
+        "click pay href \"action:copy\"  \"Copy\"",
+        "click pay href \"action:copy\" \"Copy\" extra",
+        "click pay href \"https://example.com\"",
+        "click pay href \"spec://checkout.pay\" \"tooltip\"",
+    ] {
+        let p = with_actions(bad, ACTION_TOGGLE, ACTION_SHOW);
+        assert_eq!(diags(&p), vec![(19, S004)], "{bad}");
+        assert!(p.valid().is_none());
+    }
+}
+
+#[test]
+fn rejects_an_action_on_an_undeclared_node() {
+    let p = with_actions(
+        "click gone href \"action:copy\"",
+        ACTION_TOGGLE,
+        ACTION_SHOW,
+    );
+    // `pay` has no click line now, `gone` is not a node.
+    rejects(&p, &[(19, S007)]);
+}
+
+#[test]
+fn rejects_more_than_one_click_line_per_node() {
+    // An action after a spec:// click, a spec:// click after an action, two actions.
+    let src = CHECKOUT.replacen(
+        "  click pay href \"spec://checkout.pay\"\n",
+        "  click pay href \"spec://checkout.pay\"\n  click pay href \"action:copy\"\n",
+        1,
+    );
+    let p = parse(PATH, &src);
+    assert_eq!(diags(&p), vec![(20, S015)]);
+
+    let src = CHECKOUT.replacen(
+        "  click pay href \"spec://checkout.pay\"\n",
+        "  click pay href \"action:copy\"\n  click pay href \"spec://checkout.pay\"\n",
+        1,
+    );
+    let p = parse(PATH, &src);
+    assert_eq!(diags(&p), vec![(20, S015)]);
+
+    let src = CHECKOUT.replacen(
+        "  click pay href \"spec://checkout.pay\"\n",
+        "  click pay href \"action:copy\"\n  click pay href \"action:show\"\n",
+        1,
+    );
+    let p = parse(PATH, &src);
+    assert_eq!(diags(&p), vec![(20, S015)]);
+}

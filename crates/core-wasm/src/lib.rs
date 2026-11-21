@@ -32,7 +32,7 @@ export interface Anchor {
 export interface Span { start: number; end: number }
 export type DiagnosticCode =
   | "S001" | "S002" | "S003" | "S004" | "S005" | "S006" | "S007"
-  | "S008" | "S009" | "S010" | "S011" | "S012" | "S013" | "S014"
+  | "S008" | "S009" | "S010" | "S011" | "S012" | "S013" | "S014" | "S015"
   | "W001" | "W002" | "W003";
 export interface Diagnostic { code: DiagnosticCode; file: string; line: number; message: string }
 export interface Title { text: string; id: string; line: number; span: Span }
@@ -40,6 +40,7 @@ export interface Located { line: number; span: Span }
 export interface DiagramNode { id: string; label: string; line: number; span: Span }
 export interface Edge { from: string; label: string; to: string; line: number; span: Span }
 export interface Click { node: string; target: string; line: number; span: Span }
+export interface Action { node: string; href: string; name: string; tooltip: string | null; line: number; span: Span }
 export interface Comment { text: string; line: number; span: Span }
 export interface Diagram {
   direction: "LR" | "RL" | "TD" | "TB" | "BT" | null;
@@ -50,6 +51,7 @@ export interface Diagram {
   nodes: DiagramNode[];
   edges: Edge[];
   clicks: Click[];
+  actions: Action[];
   comments: Comment[];
 }
 export interface Requirement {

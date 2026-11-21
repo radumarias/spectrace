@@ -1,6 +1,6 @@
 # Spec format
 
-Version 1. Status: proposed, waiting for approval before the parser (T4.2) starts.
+Version 1.1. Status: proposed, waiting for approval before the parser (T4.2) starts. 1.1 adds optional `action:` click lines (S015).
 
 A spec describes one flow: the steps a user or system goes through, how they connect, and what must be true at each step. The format is plain Markdown so people can read and review it in a pull request, and strict enough that a parser, a diagram editor and a drift checker agree on every byte of it.
 
@@ -13,7 +13,7 @@ These are the choices the rest of the work builds on. Everything below follows f
 1. **One file per flow, in `spec/`.** `spec/checkout.md` is the flow `checkout`. The file name is the flow id. Subfolders group flows into areas for the app map (`spec/storefront/checkout.md` is the flow `checkout` in the area `storefront`). The index reads every `spec/` folder of a repo, so `fixtures/shop/spec/checkout.md` is a spec too; a Markdown file whose name is not an id (`README.md`) is prose and is skipped.
 2. **Ids are dotted paths.** A step is `checkout.failed`, a requirement is `checkout.failed/r2`. Ids are lowercase `snake_case`, never reused, and never derived from titles, so renaming a title changes nothing downstream.
 3. **The Mermaid diagram and the headings both carry the step id.** The diagram uses the short id (`failed`), the heading carries the full id (`{#checkout.failed}`). They are checked against each other, so a mismatch is an error, not a guess.
-4. **The Mermaid is a strict subset.** Only labelled nodes, labelled edges, `click` links and comments. Anything else is an error. This is what lets the diagram editor write the file back without losing anything.
+4. **The Mermaid is a strict subset.** Only labelled nodes, labelled edges, `click` lines and comments. Anything else is an error. This is what lets the diagram editor write the file back without losing anything.
 5. **Edge labels are required.** An edge is identified by its source, label and target, so `pay -->|declined| failed` and `pay -->|ok| paid` are different edges even from the same node.
 6. **One behaviour per requirement line.** `WHEN … THE SYSTEM SHALL … . {#rN}`, exactly one WHEN and one SHALL, on one logical line. A list item that looks like a requirement but does not parse is an error, so a typo can never silently drop a requirement.
 7. **The reason for a step is a `> @flow` quote in the spec.** The `@flow` comment in code is only an anchor with a short note. The spec holds the canonical reason, the code points at it.
@@ -71,6 +71,7 @@ flowchart LR
   pay -->|ok| paid
 
   click cart href "spec://checkout.cart"
+  click pay href "action:copy?text=cargo%20test%20pay" "Copy the test command"
 ```
 
 Grammar, one construct per line, blank lines allowed anywhere:
@@ -80,6 +81,7 @@ header  = "flowchart" SP ("LR" | "RL" | "TD" | "TB" | "BT")      first line
 node    = node-id "[" label "]"
 edge    = node-id SP "-->" "|" edge-label "|" SP node-id
 click   = "click" SP node-id SP "href" SP '"spec://' step-id '"'
+action  = "click" SP node-id SP "href" SP '"action:' name ["?" query] '"' [SP '"' tooltip '"']
 comment = "%%" text
 ```
 
@@ -87,6 +89,8 @@ comment = "%%" text
 - A node is declared once, on its own line, before any edge uses it. Inline declarations such as `a[A] --> b[B]` are not allowed.
 - The node label is the short name on the box. It does not have to equal the section title (`Declined` is the box, `Declined payment` is the section).
 - `click` lines are written by the tooling so the diagram links to its section. They are optional. If present, the href must be the step id of the node it names, in this flow.
+- `action` lines make a node clickable in the app through [mermaid-actions](https://github.com/xoriors/experimental/tree/main/mermaid-actions): `copy`, `toggle`, `show` and so on. They are optional and the app runs them, the parser only checks the line. `name` is `[a-z][a-z0-9-]*`, the href has no whitespace and no `"`, the tooltip is non-empty and has no `"`, and the words are separated by single spaces.
+- A node has at most one `click` line, `spec://` or `action:`, because Mermaid keeps only one per node.
 - Self edges (`a -->|x| a`) are allowed. Cycles are allowed (`pay` to `failed` and back is the example).
 - Styles, subgraphs, other arrow types, `classDef`, `style`, `linkStyle` and any other Mermaid construct are errors, not ignored.
 
@@ -169,10 +173,10 @@ Parsing a spec gives a list of diagnostics, each with a code, a file, a line and
 | `S001` | No title line, more than one H1, or the title id is missing or does not match the file name |
 | `S002` | No `mermaid` block, or more than one |
 | `S003` | The block is not a `flowchart`, or the direction is not one of `LR RL TD TB BT` |
-| `S004` | A diagram line is not a node, labelled edge, `click` or comment |
+| `S004` | A diagram line is not a node, labelled edge, `click` (`spec://` or `action:` form) or comment |
 | `S005` | An edge has no label, an empty label or an unlabelled arrow |
 | `S006` | An id breaks the id grammar, or a node is declared twice |
-| `S007` | An edge or `click` names an undeclared node |
+| `S007` | An edge or `click` (either form) names an undeclared node |
 | `S008` | A node has no section, or a section's id is not a node |
 | `S009` | A section id repeats, or its flow part is not this flow |
 | `S010` | A list item looks like a requirement but does not parse |
@@ -180,6 +184,7 @@ Parsing a spec gives a list of diagnostics, each with a code, a file, a line and
 | `S012` | A section has more than one `@flow` quote |
 | `S013` | A `click` href does not match the node it is on |
 | `S014` | Two identical edges (same source, label and target) |
+| `S015` | A node has more than one `click` line |
 
 ### Warnings in a spec file
 

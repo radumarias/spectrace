@@ -2060,6 +2060,14 @@ export interface components {
                 line: number;
                 span: components["schemas"]["SpecSpan"];
             }[];
+            actions: {
+                node: string;
+                href: string;
+                name: string;
+                tooltip: string | null;
+                line: number;
+                span: components["schemas"]["SpecSpan"];
+            }[];
             comments: {
                 text: string;
                 line: number;

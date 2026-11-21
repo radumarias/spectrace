@@ -40,8 +40,8 @@ use std::fmt;
 
 use crate::diag::Diagnostic;
 use crate::spec::{
-    parse, Click, Comment, Diagram, Edge, FlowQuote, Node, Requirement, Section, Span, Spec,
-    MAX_LINE,
+    parse, Action, Click, Comment, Diagram, Edge, FlowQuote, Node, Requirement, Section, Span,
+    Spec, MAX_LINE,
 };
 
 /// Why [`write`] gave no output.
@@ -168,6 +168,7 @@ impl Spec {
         }
         d.edges.retain(|e| e.from != node && e.to != node);
         d.clicks.retain(|c| c.node != node);
+        d.actions.retain(|a| a.node != node);
         self.sections.retain(|s| s.node != node);
         true
     }
@@ -289,6 +290,13 @@ fn render_click(c: &Click) -> String {
     format!("click {} href \"spec://{}\"", c.node, c.target)
 }
 
+fn render_action(a: &Action) -> String {
+    match &a.tooltip {
+        Some(t) => format!("click {} href \"{}\" \"{t}\"", a.node, a.href),
+        None => format!("click {} href \"{}\"", a.node, a.href),
+    }
+}
+
 fn render_comment(c: &Comment) -> String {
     format!("%%{}", c.text)
 }
@@ -365,7 +373,8 @@ const SEQ_REPLACE: u8 = 0;
 const SEQ_NODE: u8 = 1;
 const SEQ_EDGE: u8 = 2;
 const SEQ_CLICK: u8 = 3;
-const SEQ_COMMENT: u8 = 4;
+const SEQ_ACTION: u8 = 4;
+const SEQ_COMMENT: u8 = 5;
 const SEQ_REQ: u8 = 1;
 const SEQ_FLOW: u8 = 2;
 
@@ -498,6 +507,7 @@ impl<'a> Writer<'a> {
             .map(|n| n.span)
             .or(o.edges.first().map(|x| x.span))
             .or(o.clicks.first().map(|x| x.span))
+            .or(o.actions.first().map(|x| x.span))
             .map_or("  ", |s| self.indent_of(s))
             .to_string();
 
@@ -529,6 +539,15 @@ impl<'a> Writer<'a> {
         let new_clicks = self.by_span(&o.clicks, &e.clicks, |x| x.span, render_click, &indent);
         let after_clicks = o.clicks.last().map_or(after_edges, |x| x.span.end);
         self.add_group(after_clicks, SEQ_CLICK, o.clicks.is_empty(), &new_clicks);
+
+        let new_actions = self.by_span(&o.actions, &e.actions, |x| x.span, render_action, &indent);
+        let after_actions = o.actions.last().map_or(after_clicks, |x| x.span.end);
+        self.add_group(
+            after_actions,
+            SEQ_ACTION,
+            o.actions.is_empty(),
+            &new_actions,
+        );
 
         let new_comments = self.by_span(
             &o.comments,
@@ -782,6 +801,7 @@ struct Shape {
     nodes: Vec<(String, String)>,
     edges: Vec<(String, String, String)>,
     clicks: Vec<(String, String)>,
+    actions: Vec<(String, String, Option<String>)>,
     comments: Vec<String>,
     sections: Vec<SectionShape>,
 }
@@ -822,6 +842,14 @@ impl Shape {
                     .collect()
             })
             .unwrap_or_default();
+        let mut actions: Vec<(String, String, Option<String>)> = d
+            .map(|d| {
+                d.actions
+                    .iter()
+                    .map(|a| (a.node.clone(), a.href.clone(), a.tooltip.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut comments: Vec<String> = d
             .map(|d| {
                 d.comments
@@ -852,6 +880,7 @@ impl Shape {
         nodes.sort();
         edges.sort();
         clicks.sort();
+        actions.sort();
         comments.sort();
         sections.sort();
         Shape {
@@ -861,6 +890,7 @@ impl Shape {
             nodes,
             edges,
             clicks,
+            actions,
             comments,
             sections,
         }
@@ -871,7 +901,7 @@ fn first_difference(want: &Shape, got: &Shape) -> Option<String> {
     if want == got {
         return None;
     }
-    let pairs: [(&str, String, String); 8] = [
+    let pairs: [(&str, String, String); 9] = [
         (
             "flow",
             format!("{:?}", want.flow),
@@ -901,6 +931,11 @@ fn first_difference(want: &Shape, got: &Shape) -> Option<String> {
             "clicks",
             format!("{:?}", want.clicks),
             format!("{:?}", got.clicks),
+        ),
+        (
+            "actions",
+            format!("{:?}", want.actions),
+            format!("{:?}", got.actions),
         ),
         (
             "comments",

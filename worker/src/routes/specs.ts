@@ -42,6 +42,16 @@ const Diagram = z
     nodes: z.array(z.object({ id: z.string(), label: z.string(), line: z.number().int(), span: Span })),
     edges: z.array(z.object({ from: z.string(), label: z.string(), to: z.string(), line: z.number().int(), span: Span })),
     clicks: z.array(z.object({ node: z.string(), target: z.string(), line: z.number().int(), span: Span })),
+    actions: z.array(
+      z.object({
+        node: z.string(),
+        href: z.string(),
+        name: z.string(),
+        tooltip: z.string().nullable(),
+        line: z.number().int(),
+        span: Span,
+      }),
+    ),
     comments: z.array(z.object({ text: z.string(), line: z.number().int(), span: Span })),
   })
   .openapi("SpecDiagram");
