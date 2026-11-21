@@ -100,7 +100,10 @@ export function useProjectLive(project: Project | undefined) {
       if (ev.event === "pr.updated" || ev.event === "repo.pushed") refreshPulls(qc, id);
       else {
         refreshProjects(qc);
-        if (ev.event === "succeeded") refreshPulls(qc, id); // a sync that finished brings new and changed PRs
+        if (ev.event === "succeeded") {
+          refreshPulls(qc, id); // a sync that finished brings new and changed PRs
+          void qc.invalidateQueries({ queryKey: ["specs", id] }); // and an index brings new specs
+        }
       }
     },
     () => {
