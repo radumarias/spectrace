@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "./client";
 import type { components } from "./schema";
 
@@ -42,6 +42,19 @@ export function useSpec(projectId: string | undefined, specId: string | undefine
       });
       if (response.status === 404) return null;
       if (!data) throw message(error, "Could not load the spec.");
+      return data;
+    },
+  });
+}
+
+export type SpecChangeOpened = components["schemas"]["SpecChangeOpened"];
+
+/** Saves an edited spec as a pull request on its repo (`POST …/specs/{specId}/changes`). */
+export function useSaveSpec(projectId: string, specId: string) {
+  return useMutation({
+    mutationFn: async (body: { source: string; summary: string[] }): Promise<SpecChangeOpened> => {
+      const { data, error } = await api.POST("/api/projects/{projectId}/specs/{specId}/changes", { params: { path: { projectId, specId } }, body });
+      if (!data) throw message(error, "Could not save the spec.");
       return data;
     },
   });

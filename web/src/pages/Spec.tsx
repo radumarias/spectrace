@@ -3,7 +3,7 @@
 // for the selected step. `/spec` opens the project's spec (or lists them when
 // there are several); `/spec/<id>?step=<node>&tab=<tab>` keeps the selection in
 // the address.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
@@ -12,6 +12,9 @@ import { Button, Card, Pill, Tabs } from "../ui/parts";
 import { Diagram } from "../spec/Diagram";
 import { SpecMarkdown } from "../spec/SpecMarkdown";
 import { githubLine, itemName, mermaidOf, STATUS_LABEL, STATUS_TONE, stepsOf, type Step, type StepStatus } from "../spec/model";
+
+// The editor loads spectrace-core (WASM) only when someone edits.
+const SpecEditor = lazy(() => import("../spec/SpecEditor").then((m) => ({ default: m.SpecEditor })));
 
 const TABS = [
   { id: "diagram", label: "Diagram" },
@@ -289,7 +292,7 @@ export function SpecPage() {
   const want = params.get("step");
   const step = steps.find((s) => s.node === want) ?? steps.find((s) => s.status !== "ok") ?? steps[0];
 
-  const set = (k: "tab" | "step" | "md", v: string | null) =>
+  const set = (k: "tab" | "step" | "md" | "edit", v: string | null) =>
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
@@ -366,6 +369,11 @@ export function SpecPage() {
           <span className="lbl">
             {spec.flow} · {tested}/{total} requirements tested
           </span>
+          {mermaid && (
+            <Button small variant="primary" onClick={() => set("edit", "1")}>
+              Edit diagram
+            </Button>
+          )}
         </div>
         {mermaid ? (
           <div className="dia-wrap">
@@ -388,6 +396,26 @@ export function SpecPage() {
         ) : null}
         <Legend />
       </>
+    );
+  }
+
+  if (params.get("edit") && spec.model && mermaid) {
+    return (
+      <div className="page">
+        <div className="head">
+          <div>
+            <span className="mono sub" style={{ fontSize: 12, overflowWrap: "anywhere" }}>
+              {crumbs}
+            </span>
+            <h1>
+              {spec.title} <Pill tone="acc">editing</Pill>
+            </h1>
+          </div>
+        </div>
+        <Suspense fallback={<p className="sub">Loading the editor…</p>}>
+          <SpecEditor key={spec.source} spec={spec} projectId={project.id} onClose={() => set("edit", null)} />
+        </Suspense>
+      </div>
     );
   }
 

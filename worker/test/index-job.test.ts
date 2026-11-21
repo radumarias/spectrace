@@ -36,6 +36,8 @@ let calls: string[] = [];
 let devpageCalls: { req: string; author: string | null; file?: { path: string; text: string } }[] = [];
 let devpageDocs = new Map<string, number>();
 let devpageRefuses = false;
+/** Writes the GitHub mock took: method, path and JSON body. */
+let ghWrites: { req: string; body: Record<string, unknown> }[] = [];
 
 /** The one file of a stored zip (src/zip.ts). */
 function unzipOne(bytes: Uint8Array): { path: string; text: string } {
@@ -76,6 +78,7 @@ function mockGithub() {
   devpageCalls = [];
   devpageDocs = new Map();
   devpageRefuses = false;
+  ghWrites = [];
   tarballs = [];
   flaky = 0;
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -105,6 +108,19 @@ function mockGithub() {
     if (rest.startsWith("/tarball/")) {
       tarballs.push(decodeURIComponent(rest.slice("/tarball/".length)));
       return new Response(await tarGz(r.files ?? {}), { headers: { "content-type": "application/x-gzip" } });
+    }
+    if (rest.startsWith("/contents/") && req.method === "GET") {
+      const file = r.files?.[decodeURIComponent(rest.slice("/contents/".length))];
+      if (file === undefined) return Response.json({ message: "Not Found" }, { status: 404 });
+      expect(url.searchParams.get("ref")).toBe((r.meta as { default_branch: string }).default_branch);
+      return Response.json({ sha: "blob-1", encoding: "base64", content: btoa(String.fromCharCode(...new TextEncoder().encode(file))).replace(/(.{60})/g, "$1\n") });
+    }
+    if (rest.startsWith("/git/ref/heads/")) return Response.json({ ref: rest.slice(9), object: { sha: "base-sha" } });
+    if (req.method !== "GET" && (rest === "/git/refs" || rest.startsWith("/contents/") || rest === "/pulls")) {
+      const body = (await req.json()) as Record<string, unknown>;
+      ghWrites.push({ req: `${req.method} ${rest}`, body });
+      if (rest === "/pulls") return Response.json({ number: 7, html_url: `https://github.com/${m[1]}/pull/7` }, { status: 201 });
+      return Response.json({}, { status: 201 });
     }
     if (rest === "/languages") {
       if (flaky > 0) {
@@ -512,5 +528,54 @@ describe("devpage", () => {
     await reindex(cookie, project.id);
     expect(devpageCalls.map((c) => c.req)).toEqual(["POST /api/documents?entry=checkout.md"]);
     expect((await detailOf(cookie, project.id, spec!.id)).devpage).toMatchObject({ version: 1 });
+  });
+});
+
+describe("saving an edited spec", () => {
+  const save = (cookie: string, projectId: string, specId: string, body: unknown) =>
+    call(`/api/projects/${projectId}/specs/${specId}/changes`, cookie, { method: "POST", body: JSON.stringify(body) });
+
+  it("commits the edited file on a new branch and opens a pull request", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const [spec] = await specsOf(cookie, project.id);
+    const edited = SHOP["spec/checkout.md"]!.replace("failed[Declined]", "failed[Payment declined]").replace("## Declined payment {#checkout.failed}", "## Payment declined {#checkout.failed}");
+
+    const res = await save(cookie, project.id, spec!.id, { source: edited, summary: ["Renamed Declined to Payment declined"] });
+    expect(res.status).toBe(201);
+    const opened = (await res.json()) as { number: number; url: string; branch: string };
+    expect(opened).toMatchObject({ number: 7, url: "https://github.com/acme/shop/pull/7" });
+    expect(opened.branch).toMatch(/^spectrace\/spec-checkout-[a-z0-9]+$/);
+
+    expect(ghWrites.map((w) => w.req)).toEqual(["POST /git/refs", "PUT /contents/spec/checkout.md", "POST /pulls"]);
+    expect(ghWrites[0]!.body).toEqual({ ref: `refs/heads/${opened.branch}`, sha: "base-sha" });
+    const put = ghWrites[1]!.body as { content: string; sha: string; branch: string; message: string };
+    expect(new TextDecoder().decode(Uint8Array.from(atob(put.content), (ch) => ch.charCodeAt(0)))).toBe(edited);
+    expect(put).toMatchObject({ sha: "blob-1", branch: opened.branch, message: "Edit spec/checkout.md\n\n- Renamed Declined to Payment declined" });
+    expect(ghWrites[2]!.body).toMatchObject({ title: "Spec: Checkout (1 change)", head: opened.branch, base: "trunk" });
+  });
+
+  it("refuses no change, a spec with errors, a spec changed on GitHub, and other users", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const [spec] = await specsOf(cookie, project.id);
+    const source = SHOP["spec/checkout.md"]!;
+
+    expect((await save(cookie, project.id, spec!.id, { source, summary: [] })).status).toBe(400);
+    const broken = await save(cookie, project.id, spec!.id, { source: source.replace("  cart -->|start| details\n", "  cart -->|start| nowhere\n"), summary: [] });
+    expect(broken.status).toBe(400);
+    expect(((await broken.json()) as { error: { message: string } }).error.message).toContain("errors");
+    const other = await setup([]);
+    expect((await save(other.cookie, project.id, spec!.id, { source: `${source}\n`, summary: [] })).status).toBe(404);
+
+    REPOS["acme/shop"]!.files = { ...SHOP, "spec/checkout.md": source.replace("disable the checkout button", "hide the checkout button") };
+    try {
+      const stale = await save(cookie, project.id, spec!.id, { source: source.replace("show the reason", "show why"), summary: ["x"] });
+      expect(stale.status).toBe(409);
+      expect(((await stale.json()) as { error: { message: string } }).error.message).toContain("changed on trunk");
+    } finally {
+      REPOS["acme/shop"]!.files = SHOP;
+    }
+    expect(ghWrites).toEqual([]);
   });
 });

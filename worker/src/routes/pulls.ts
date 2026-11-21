@@ -304,7 +304,7 @@ async function writablePull(c: Context<AppEnv>, projectId: string, pullId: strin
 }
 
 /** A call to GitHub as the App installed on the repo's owner. Returns the status and body; 5xx and network errors throw. */
-async function github(env: Bindings, projectId: string, fullName: string, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
+export async function github(env: Bindings, projectId: string, fullName: string, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
   const installationId = await installationFor(env, projectId, fullName);
   if (installationId === null) throw new AppError("conflict", `conflict: no GitHub App installation for ${fullName}; install the app on its owner first`);
   const app = appConfigFromEnv(env);

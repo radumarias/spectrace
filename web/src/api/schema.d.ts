@@ -1830,6 +1830,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/specs/{specId}/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save an edited spec: commit it on a new branch and open a pull request */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    specId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SpecChange"];
+                };
+            };
+            responses: {
+                /** @description The pull request */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SpecChangeOpened"];
+                    };
+                };
+                /** @description Nothing changed, or the edited spec has errors */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or spec */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The spec changed on GitHub since it was indexed, or GitHub refused */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2125,6 +2204,24 @@ export interface components {
             target: string;
             note: string | null;
             excerpt: string;
+        };
+        SpecChangeOpened: {
+            number: number;
+            /** @example https://github.com/acme/shop/pull/7 */
+            url: string;
+            /** @example spectrace/spec-checkout-m3k2x1 */
+            branch: string;
+        };
+        SpecChange: {
+            /** @description The whole spec file as edited. */
+            source: string;
+            /**
+             * @description One line per change, for the pull request.
+             * @example [
+             *       "Renamed Declined to Payment declined"
+             *     ]
+             */
+            summary: string[];
         };
     };
     responses: never;
