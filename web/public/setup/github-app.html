@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Create the spectrace GitHub App</title>
+<style>body{font:16px system-ui;max-width:32rem;margin:3rem auto;padding:0 16px}button{font:inherit;padding:.6rem 1rem}</style></head>
+<body>
+<h1>Create the GitHub App</h1>
+<p>This registers a GitHub App for this deployment through GitHub's manifest flow. GitHub asks you to confirm the name, then sends you back here with a one-time code.</p>
+<form id="f" method="post"><input type="hidden" name="manifest" id="m"><button type="submit">Create GitHub App on GitHub</button></form>
+<script>
+const o = location.origin;
+const manifest = {
+  name: "spectrace-" + location.hostname.split(".")[0],
+  url: o,
+  hook_attributes: { url: o + "/api/github/webhook", active: true },
+  redirect_url: o + "/setup/created.html",
+  callback_urls: [o + "/api/auth/github/callback"],
+  setup_url: o + "/api/github/install/callback",
+  setup_on_update: true,
+  request_oauth_on_install: true,
+  public: false,
+  default_permissions: { contents: "read", pull_requests: "write", checks: "read", metadata: "read" },
+  default_events: ["pull_request", "pull_request_review", "check_suite", "push"],
+};
+document.getElementById("m").value = JSON.stringify(manifest);
+document.getElementById("f").action = "https://github.com/settings/apps/new?state=" + crypto.randomUUID();
+</script></body></html>
