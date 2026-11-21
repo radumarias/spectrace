@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
 import { useMergePull, usePull, usePullReviews, useReviewPull, type PullDetail as Pull } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
+import { Markdown, stripHtmlComments } from "../ui/Markdown";
 import { useToast } from "../ui/Toast";
 
 const STATE: Record<Pull["state"], { tone: PillTone; label: string }> = {
@@ -77,7 +78,7 @@ function Walkthrough({ pull: p }: { pull: Pull }) {
       <div className="main stack">
         <Card className="stack">
           <span className="lbl">What this PR does</span>
-          <p className="pr-body">{p.body.trim() || "The author did not write a description."}</p>
+          {stripHtmlComments(p.body).trim() ? <Markdown>{p.body}</Markdown> : <p className="sub">The author did not write a description.</p>}
         </Card>
       </div>
       <div className="aside stack">

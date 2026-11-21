@@ -129,3 +129,22 @@ it("shows why a merge was refused", async () => {
   expect((await screen.findByRole("alert")).textContent).toContain("head moved");
   expect((screen.getByRole("button", { name: "Merge PR" }) as HTMLButtonElement).disabled).toBe(false);
 });
+
+it("shows the description as markdown without HTML comments or raw HTML", async () => {
+  server({
+    ...PULL,
+    body: "<!-- fill this in -->\n## Summary\n\nAdds **bold** and [a link](https://example.com).\n\n<script>alert(1)</script>\n\n- [x] done\n",
+  });
+  const { container } = at("/pr/pr-1");
+  expect(await screen.findByRole("heading", { name: "Summary" })).toBeTruthy();
+  expect(container.querySelector("strong")?.textContent).toBe("bold");
+  expect(container.querySelector("a[href='https://example.com']")?.getAttribute("rel")).toContain("noopener");
+  expect(container.textContent).not.toContain("fill this in");
+  expect(container.querySelector("script")).toBeNull();
+});
+
+it("says there is no description when the body is only comments", async () => {
+  server({ ...PULL, body: "<!--\nTemplate help\n-->" });
+  at("/pr/pr-1");
+  expect(await screen.findByText("The author did not write a description.")).toBeTruthy();
+});
