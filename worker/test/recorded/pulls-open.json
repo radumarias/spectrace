@@ -1,0 +1,18 @@
+[
+  {
+    "id": 9001, "number": 7, "state": "open", "draft": false,
+    "title": "Add coupon field to checkout", "body": "Lets shoppers enter a coupon code.\n\nCloses #3",
+    "html_url": "https://github.com/acme/shop/pull/7",
+    "user": { "login": "mona" },
+    "head": { "ref": "feat/coupon", "sha": "aaa111" }, "base": { "ref": "main" },
+    "created_at": "2026-11-18T09:00:00Z", "updated_at": "2026-11-19T10:30:00Z"
+  },
+  {
+    "id": 9002, "number": 9, "state": "open", "draft": true,
+    "title": "Rename cart totals", "body": null,
+    "html_url": "https://github.com/acme/shop/pull/9",
+    "user": { "login": "octocat" },
+    "head": { "ref": "chore/totals", "sha": "bbb222" }, "base": { "ref": "main" },
+    "created_at": "2026-11-20T08:00:00Z", "updated_at": "2026-11-20T08:05:00Z"
+  }
+]
