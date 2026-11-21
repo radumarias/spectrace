@@ -25,6 +25,7 @@ use crate::anchor::{is_valid_segment, is_valid_step_id, is_valid_tag};
 use crate::diag::{Code, Diagnostic};
 
 /// A byte range `start..end` in the parsed source.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Span {
     pub start: usize,
@@ -39,6 +40,7 @@ impl Span {
 }
 
 /// The result of parsing one spec file.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parsed {
     /// Best effort when there are errors; trust it only through [`Parsed::valid`].
@@ -67,6 +69,7 @@ impl Parsed {
 }
 
 /// One flow.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Spec {
     /// The flow id, from the file name (`checkout` for `spec/checkout.md`).
@@ -100,6 +103,7 @@ impl Spec {
 }
 
 /// `# Checkout {#checkout}`
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Title {
     pub text: String,
@@ -110,6 +114,7 @@ pub struct Title {
 }
 
 /// Layout direction of the flowchart.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Direction {
     LR,
@@ -143,6 +148,7 @@ impl Direction {
 }
 
 /// The fenced `mermaid` block.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagram {
     /// `None` when the header is missing or wrong (an `S003` error).
@@ -169,6 +175,7 @@ impl Diagram {
 }
 
 /// A line and its span, for elements with no content of their own.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Located {
     pub line: usize,
@@ -176,6 +183,7 @@ pub struct Located {
 }
 
 /// `failed[Declined]`
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
     pub id: String,
@@ -185,6 +193,7 @@ pub struct Node {
 }
 
 /// `pay -->|declined| failed`. Identified by source, label and target.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Edge {
     pub from: String,
@@ -195,6 +204,7 @@ pub struct Edge {
 }
 
 /// `click failed href "spec://checkout.failed"`
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Click {
     pub node: String,
@@ -205,6 +215,7 @@ pub struct Click {
 }
 
 /// `%% a comment`, text after `%%` as written.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Comment {
     pub text: String,
@@ -213,6 +224,7 @@ pub struct Comment {
 }
 
 /// `## Declined payment {#checkout.failed}` and what follows it.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
     /// The full step id, `checkout.failed`.
@@ -232,6 +244,7 @@ pub struct Section {
 }
 
 /// `- WHEN <condition> THE SYSTEM SHALL <response>. {#r1}`
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Requirement {
     pub tag: String,
@@ -253,6 +266,7 @@ impl Requirement {
 }
 
 /// `> @flow <reason>`, possibly over several `>` lines.
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowQuote {
     /// The reason, lines joined with single spaces.
