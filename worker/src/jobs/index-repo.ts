@@ -6,6 +6,7 @@ import { AppError } from "../error";
 import { appConfigFromEnv, appJwt, ghHeaders, installationToken, type AppConfig } from "../github-app";
 import { log } from "../log";
 import { enqueueJob, PermanentError, type JobContext, type JobRow } from "./queue";
+import { SYNC_KIND } from "./sync";
 
 export const INDEX_KIND = "index";
 
@@ -24,6 +25,14 @@ export async function enqueueIndexes(env: Bindings, projectId: string, repoIds: 
     } catch (error) {
       log("error", "could not queue index job", { projectId, repoId, error: String(error) }, env.LOG_FORMAT);
       await markFailed(env, repoId, "could not be queued");
+    }
+  }
+  // Pull requests do not wait for the index: the first sync starts right away.
+  if (repoIds.length > 0) {
+    try {
+      await enqueueJob(env, projectId, SYNC_KIND, "", 3);
+    } catch (error) {
+      log("error", "could not queue sync job", { projectId, error: String(error) }, env.LOG_FORMAT);
     }
   }
 }

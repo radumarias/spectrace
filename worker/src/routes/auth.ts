@@ -2,6 +2,7 @@ import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppEnv } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { linkUserInstallations } from "../github-app";
 import {
   SESSION_COOKIE,
   SESSION_DAYS,
@@ -144,6 +145,9 @@ export function registerAuth(app: OpenAPIHono<AppEnv>) {
       .bind(crypto.randomUUID(), p.id, p.login, p.name ?? null, p.avatar_url ?? null, now.toISOString())
       .first<{ id: string }>();
     if (!user) throw new AppError("internal", "user upsert returned no row");
+
+    // An App installed before (or without coming back through the install page) is picked up on every sign-in.
+    await linkUserInstallations(c.env.DB, gh.apiUrl, user.id, accessToken);
 
     const sessionToken = randomToken();
     const expires = new Date(now.getTime() + SESSION_DAYS * 86_400_000);
