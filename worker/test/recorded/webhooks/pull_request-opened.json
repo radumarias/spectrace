@@ -1,0 +1,32 @@
+{
+  "action": "opened",
+  "number": 7,
+  "pull_request": {
+    "id": 9007,
+    "number": 7,
+    "state": "open",
+    "draft": false,
+    "merged_at": null,
+    "title": "Add coupon field to checkout",
+    "body": "Lets shoppers enter a coupon code.",
+    "html_url": "https://github.com/acme/shop/pull/7",
+    "user": {
+      "login": "mona"
+    },
+    "head": {
+      "ref": "feat/coupon",
+      "sha": "aaa111"
+    },
+    "base": {
+      "ref": "main"
+    },
+    "created_at": "2026-11-18T09:00:00Z",
+    "updated_at": "2026-11-19T10:30:00Z",
+    "additions": 46,
+    "deletions": 2,
+    "changed_files": 2
+  },
+  "repository": {
+    "full_name": "acme/shop"
+  }
+}

@@ -9,37 +9,13 @@
 import type { Bindings } from "../env";
 import { AppError } from "../error";
 import { appConfigFromEnv, ghHeaders, installationToken, type AppConfig } from "../github-app";
+import { pullStatements, type GhFile, type GhPull } from "../pulls";
 import { PermanentError, registerHandler, type JobHandler } from "./queue";
 
 export const SYNC_KIND = "sync";
 const PAGE_SIZE = 100;
 /** GitHub stops listing a PR's files after 3000. */
 const MAX_FILE_PAGES = 30;
-/** D1 allows 100 bound values per statement. */
-const FILE_ROWS_PER_INSERT = 12;
-
-interface GhPull {
-  id: number;
-  number: number;
-  title: string;
-  body: string | null;
-  state: string;
-  draft?: boolean;
-  html_url: string;
-  user: { login: string } | null;
-  head: { ref: string; sha: string };
-  base: { ref: string };
-  created_at: string;
-  updated_at: string;
-}
-
-interface GhFile {
-  filename: string;
-  status: string;
-  previous_filename?: string;
-  additions: number;
-  deletions: number;
-}
 
 interface RepoRow {
   id: string;
@@ -89,54 +65,18 @@ async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: 
   const pulls = await ghPages<GhPull>(app, token, `pulls of ${repo.full_name}`, `/repos/${repo.full_name}/pulls?state=open&sort=created&direction=asc`);
   const known = new Map(
     (
-      await env.DB.prepare("SELECT id, number, head_sha FROM pull_requests WHERE repo_id = ?1")
+      await env.DB.prepare("SELECT id, number, files_sha FROM pull_requests WHERE repo_id = ?1")
         .bind(repo.id)
-        .all<{ id: string; number: number; head_sha: string }>()
+        .all<{ id: string; number: number; files_sha: string | null }>()
     ).results.map((r) => [r.number, r]),
   );
 
   for (const pr of pulls) {
     const before = known.get(pr.number);
-    // Files only change with the head commit; skip the extra requests when it has not moved.
-    const files = before?.head_sha === pr.head.sha ? null : await ghPages<GhFile>(app, token, `files of ${repo.full_name}#${pr.number}`, `/repos/${repo.full_name}/pulls/${pr.number}/files`, MAX_FILE_PAGES);
-    const id = before?.id ?? crypto.randomUUID();
-    const stats = files
-      ? { additions: files.reduce((n, f) => n + f.additions, 0), deletions: files.reduce((n, f) => n + f.deletions, 0), changed: files.length }
-      : null;
-
-    const statements: D1PreparedStatement[] = [
-      env.DB.prepare(
-        `INSERT INTO pull_requests (id, repo_id, number, github_pr_id, title, body, author_login, state, draft, head_ref, head_sha, base_ref, html_url,
-                                    additions, deletions, changed_files, github_created_at, github_updated_at, synced_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'open', ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-         ON CONFLICT (repo_id, number) DO UPDATE SET
-           github_pr_id = excluded.github_pr_id, title = excluded.title, body = excluded.body, author_login = excluded.author_login,
-           state = 'open', draft = excluded.draft, head_ref = excluded.head_ref, head_sha = excluded.head_sha, base_ref = excluded.base_ref,
-           html_url = excluded.html_url,
-           additions = CASE WHEN ?18 THEN excluded.additions ELSE additions END,
-           deletions = CASE WHEN ?18 THEN excluded.deletions ELSE deletions END,
-           changed_files = CASE WHEN ?18 THEN excluded.changed_files ELSE changed_files END,
-           github_created_at = excluded.github_created_at, github_updated_at = excluded.github_updated_at, synced_at = excluded.synced_at`,
-      ).bind(
-        id, repo.id, pr.number, pr.id, pr.title, pr.body ?? "", pr.user?.login ?? "", pr.draft ? 1 : 0, pr.head.ref, pr.head.sha, pr.base.ref, pr.html_url,
-        stats?.additions ?? 0, stats?.deletions ?? 0, stats?.changed ?? 0, pr.created_at, pr.updated_at, stats ? 1 : 0,
-      ),
-    ];
-    if (files) {
-      statements.push(env.DB.prepare("DELETE FROM pr_files WHERE pull_request_id = ?1").bind(id));
-      for (let i = 0; i < files.length; i += FILE_ROWS_PER_INSERT) {
-        const chunk = files.slice(i, i + FILE_ROWS_PER_INSERT);
-        const values = chunk.map((_, k) => `(?1, ?${k * 5 + 2}, ?${k * 5 + 3}, ?${k * 5 + 4}, ?${k * 5 + 5}, ?${k * 5 + 6})`).join(", ");
-        statements.push(
-          env.DB.prepare(`INSERT OR REPLACE INTO pr_files (pull_request_id, path, status, previous_path, additions, deletions) VALUES ${values}`).bind(
-            id,
-            ...chunk.flatMap((f) => [f.filename, f.status, f.previous_filename ?? null, f.additions, f.deletions]),
-          ),
-        );
-      }
-    }
+    // Files only change with the head commit; skip the extra requests when they were already read for this one.
+    const files = before?.files_sha === pr.head.sha ? null : await ghPages<GhFile>(app, token, `files of ${repo.full_name}#${pr.number}`, `/repos/${repo.full_name}/pulls/${pr.number}/files`, MAX_FILE_PAGES);
     // One batch is one transaction: a PR never shows half its files.
-    await env.DB.batch(statements);
+    await env.DB.batch(pullStatements(env, repo.id, before?.id ?? crypto.randomUUID(), pr, files));
     await progress(pr.number);
   }
 

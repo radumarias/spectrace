@@ -10,3 +10,5 @@ GITHUB_APP_ID=
 GITHUB_APP_SLUG=
 # The .pem, on one line with \n for line breaks
 GITHUB_APP_PRIVATE_KEY=
+# The App's webhook secret; set the same string on the App (Webhook URL: PUBLIC_URL + /api/github/webhook)
+GITHUB_WEBHOOK_SECRET=
