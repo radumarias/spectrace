@@ -19,7 +19,7 @@ const PULL = {
 // Opens a pull request and reads its description and files, with no horizontal scroll and no console errors.
 // The inbox that links here is T2.4; this opens the same /pr/<id> address its rows use.
 test("a pull request shows its header, description and files", async ({ page }) => {
-  await mockApi(page, { "/api/me": USER, "/api/projects": [PROJECT], "/api/projects/p1/pulls/pr-1": PULL, "/api/projects/p1/pulls/pr-1/reviews": { reviews: [] } });
+  await mockApi(page, { "/api/me": USER, "/api/projects": [PROJECT], "/api/projects/p1/pulls": { pulls: [PULL], counts: { needs: 1, open: 1, merged: 0 } }, "/api/projects/p1/pulls/pr-1": PULL, "/api/projects/p1/pulls/pr-1/reviews": { reviews: [] } });
   await page.addInitScript(() => localStorage.setItem("spectrace-proj", "p1"));
   const errors = trackErrors(page);
 
