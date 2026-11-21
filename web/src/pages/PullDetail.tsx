@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
-import { usePull, type PullDetail as Pull } from "../api/pulls";
+import { useMergePull, usePull, usePullReviews, useReviewPull, type PullDetail as Pull } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
+import { useToast } from "../ui/Toast";
 
 const STATE: Record<Pull["state"], { tone: PillTone; label: string }> = {
   open: { tone: "acc", label: "open" },
@@ -56,17 +57,7 @@ export function PullDetail() {
             <Pill tone="idle">{p.changedFiles} {p.changedFiles === 1 ? "file" : "files"} changed</Pill>
           </div>
         </div>
-        <div className="stack-s" style={{ alignItems: "flex-end" }}>
-          <div className="btns">
-            {/* Wired up by T2.6 (approve, request changes, merge). */}
-            <Button disabled>Request changes</Button>
-            <Button disabled>Approve</Button>
-            <Button variant="primary" disabled>{p.state === "merged" ? "Merged" : "Merge PR"}</Button>
-          </div>
-          <span className="sub" style={{ fontSize: 12, textAlign: "right", maxWidth: 340 }}>
-            Approve and merge arrive with the next update.
-          </span>
-        </div>
+        <Actions projectId={project.id} pull={p} />
       </div>
 
       <Tabs
@@ -130,6 +121,90 @@ function Files({ pull: p }: { pull: Pull }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function Actions({ projectId, pull: p }: { projectId: string; pull: Pull }) {
+  const toast = useToast();
+  const reviews = usePullReviews(projectId, p.id);
+  const review = useReviewPull(projectId, p.id);
+  const merge = useMergePull(projectId, p.id);
+  const [asking, setAsking] = useState(false);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+
+  const mine = reviews.data?.[0];
+  // A review counts for the commit it was left on; a new push starts again.
+  const current = mine && mine.headSha === p.headSha ? mine.verdict : null;
+  const open = p.state === "open";
+  const busy = review.isPending || merge.isPending;
+
+  const send = (verdict: "approve" | "request_changes", body?: string) => {
+    setError("");
+    review.mutate(
+      { verdict, body },
+      {
+        onSuccess: () => {
+          setAsking(false);
+          setNote("");
+          toast(verdict === "approve" ? "Approved" : "Changes requested");
+        },
+        onError: (e) => setError(e.message),
+      },
+    );
+  };
+  const doMerge = () => {
+    setError("");
+    merge.mutate(undefined, { onSuccess: () => toast("Merged"), onError: (e) => setError(e.message) });
+  };
+
+  return (
+    <div className="stack-s" style={{ alignItems: "flex-end" }}>
+      <div className="btns">
+        {open && (
+          <>
+            <Button disabled={busy} onClick={() => setAsking((a) => !a)} aria-expanded={asking}>Request changes</Button>
+            <Button disabled={busy || current === "approved"} aria-pressed={current === "approved"} onClick={() => send("approve")}>
+              {current === "approved" ? "✓ Approved" : "Approve"}
+            </Button>
+          </>
+        )}
+        <Button variant={p.state === "merged" ? "default" : "primary"} disabled={!open || p.draft || busy} onClick={doMerge}>
+          {p.state === "merged" ? "Merged" : merge.isPending ? "Merging…" : "Merge PR"}
+        </Button>
+      </div>
+      <span className="sub" style={{ fontSize: 12, textAlign: "right", maxWidth: 340 }}>
+        {p.state === "merged"
+          ? "Merged"
+          : p.state === "closed"
+            ? "Closed without merging"
+            : p.draft
+              ? "Draft: mark it ready on GitHub to merge"
+              : current === "changes_requested"
+                ? "You asked for changes on this commit"
+                : current === "approved"
+                  ? "You approved this commit"
+                  : "Waiting on your review"}
+      </span>
+      {error && <span className="err" role="alert" style={{ textAlign: "right", maxWidth: 340 }}>{error}</span>}
+      {asking && open && (
+        <form
+          className="fld"
+          style={{ width: "min(340px, 100%)" }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            send("request_changes", note.trim());
+          }}
+        >
+          <label htmlFor="changes-note">What should change?</label>
+          <textarea id="changes-note" value={note} onChange={(e) => setNote(e.target.value)} />
+          <div className="btns">
+            <Button variant="primary" small type="submit" disabled={busy || note.trim() === ""}>Send</Button>
+            <Button small onClick={() => setAsking(false)}>Cancel</Button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
