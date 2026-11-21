@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import type { AppEnv } from "./env";
+import type { AppEnv, Bindings } from "./env";
 import { AppError } from "./error";
 import { githubConfig } from "./auth";
 
@@ -100,4 +100,20 @@ export async function installationToken(app: AppConfig, installationId: number):
 
 export function forgetInstallationTokens() {
   tokenCache.clear();
+}
+
+/** The app config for code that runs outside a request (the job queue). */
+export function appConfigFromEnv(env: Bindings): AppConfig {
+  const { GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY } = env;
+  if (!GITHUB_APP_ID?.trim() || !GITHUB_APP_SLUG?.trim() || !GITHUB_APP_PRIVATE_KEY?.trim()) {
+    throw new AppError("internal", "GitHub App is not configured (GITHUB_APP_ID / GITHUB_APP_SLUG / GITHUB_APP_PRIVATE_KEY)");
+  }
+  const origin = (env.GITHUB_OAUTH_URL ?? "https://github.com").replace(/\/+$/, "");
+  return {
+    appId: GITHUB_APP_ID.trim(),
+    slug: GITHUB_APP_SLUG.trim(),
+    privateKey: GITHUB_APP_PRIVATE_KEY,
+    webUrl: origin,
+    apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, ""),
+  };
 }

@@ -1,6 +1,7 @@
 import { createApp } from "./app";
 import type { Bindings } from "./env";
 import { consume, type JobMessage } from "./jobs/queue";
+import "./jobs/sync"; // registers the "sync" job kind
 
 export { ProjectHub } from "./hub";
 
