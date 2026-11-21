@@ -155,6 +155,27 @@
               "ready",
               "failed"
             ]
+          },
+          "languages": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "file_count": {
+            "type": "integer",
+            "nullable": true
+          },
+          "tree_truncated": {
+            "type": "boolean"
+          },
+          "indexed_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "index_error": {
+            "type": "string",
+            "nullable": true
           }
         },
         "required": [
@@ -162,7 +183,12 @@
           "github_repo_id",
           "full_name",
           "default_branch",
-          "index_state"
+          "index_state",
+          "languages",
+          "file_count",
+          "tree_truncated",
+          "indexed_at",
+          "index_error"
         ]
       },
       "Job": {
@@ -807,6 +833,53 @@
         "responses": {
           "204": {
             "description": "Deleted"
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/reindex": {
+      "post": {
+        "summary": "Index every repository of the project again",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The project, with its repos back to pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
           },
           "401": {
             "description": "Not signed in",

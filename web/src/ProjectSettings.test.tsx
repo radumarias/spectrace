@@ -16,6 +16,7 @@ const repo = (full_name: string, index_state = "ready"): Repo => ({ id: `r-${ful
 /** A fake server that keeps its projects, so a "reload" (a new app on the same server) sees what was saved. */
 function fakeServer(projects: Stored[]) {
   const patches: unknown[] = [];
+  const reindexed: string[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: Request | string, init?: RequestInit) => {
@@ -34,6 +35,13 @@ function fakeServer(projects: Stored[]) {
         if (body.repos) found.repos = body.repos.map((r) => found.repos.find((x) => x.full_name === r.full_name) ?? repo(r.full_name, "pending"));
         return Response.json(found);
       }
+      const re = /^\/api\/projects\/([^/]+)\/reindex$/.exec(path);
+      const target = re ? projects.find((p) => p.id === re[1]) : undefined;
+      if (target && req.method === "POST") {
+        reindexed.push(target.id);
+        target.repos.forEach((r) => (r.index_state = "pending"));
+        return Response.json(target);
+      }
       if (found && req.method === "DELETE") {
         projects.splice(projects.indexOf(found), 1);
         return new Response(null, { status: 204 });
@@ -41,7 +49,7 @@ function fakeServer(projects: Stored[]) {
       return new Response(null, { status: 404 });
     }),
   );
-  return { patches };
+  return { patches, reindexed };
 }
 
 const at = (path: string) =>
@@ -125,10 +133,65 @@ it("removes the project only after a confirm step", async () => {
   expect(localStorage.getItem("spectrace-proj")).toBeNull();
 });
 
-it("re-index is disabled until the index job exists", async () => {
-  fakeServer([shop()]);
+/** A WebSocket the test can push events through. */
+class FakeSocket {
+  static all: FakeSocket[] = [];
+  onmessage: ((m: { data: string }) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  closed = false;
+  seq = 0;
+  constructor(public url: string) {
+    FakeSocket.all.push(this);
+  }
+  close() {
+    this.closed = true;
+  }
+  push(event: string) {
+    this.onmessage?.({ data: JSON.stringify({ id: ++this.seq, projectId: "p1", jobId: "j", event, data: {}, createdAt: "x" }) });
+  }
+}
+
+it("re-index queues the job, shows the banner, and ends in indexed from live events", async () => {
+  FakeSocket.all = [];
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const user = userEvent.setup();
+  const projects = [shop()];
+  const server = fakeServer(projects);
   at("/project");
-  expect(((await screen.findByRole("button", { name: "Re-index repos" })) as HTMLButtonElement).disabled).toBe(true);
+  const button = (await screen.findByRole("button", { name: "Re-index repos" })) as HTMLButtonElement;
+  expect(button.disabled).toBe(false);
+  expect(FakeSocket.all).toHaveLength(0); // nothing is indexing, so nothing to listen to
+  await user.click(button);
+  expect(server.reindexed).toEqual(["p1"]);
+  expect(await screen.findByText(/Indexing · 0 of 2 repos ready/)).toBeTruthy();
+  expect(((await screen.findByRole("button", { name: "Indexing…" })) as HTMLButtonElement).disabled).toBe(true);
+  await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+  expect(FakeSocket.all[0]!.url).toBe("ws://localhost:3000/api/projects/p1/events".replace("localhost:3000", location.host));
+
+  // The Worker finishes the first repo and says so.
+  projects[0]!.repos[0]!.index_state = "ready";
+  FakeSocket.all[0]!.push("succeeded");
+  expect(await screen.findByText(/Indexing · 1 of 2 repos ready/)).toBeTruthy();
+
+  projects[0]!.repos[1]!.index_state = "ready";
+  FakeSocket.all[0]!.push("succeeded");
+  expect(await screen.findByRole("button", { name: "Re-index repos" })).toBeTruthy();
+  expect(screen.queryByText(/Indexing · /)).toBeNull();
+  await waitFor(() => expect(FakeSocket.all[0]!.closed).toBe(true));
+});
+
+it("a project that is already indexing updates its card on the Projects page", async () => {
+  FakeSocket.all = [];
+  vi.stubGlobal("WebSocket", FakeSocket);
+  const projects = [{ ...shop(), repos: [repo("acme/shop", "indexing")] }];
+  fakeServer(projects);
+  at("/projects");
+  expect(await screen.findByText(/Indexing · 0 of 1 repos ready/)).toBeTruthy();
+  projects[0]!.repos[0]!.index_state = "ready";
+  await waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+  FakeSocket.all[0]!.push("succeeded");
+  expect(await screen.findByText("indexed")).toBeTruthy();
 });
 
 it("shows project Home with an indexing banner, context and repo count", async () => {

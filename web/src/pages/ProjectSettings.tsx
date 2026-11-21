@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { clearCurrentProjectId } from "../api/current";
-import { useCurrentProject, useDeleteProject, useGithubRepos, useUpdateProject, type Project, type ProjectChange } from "../api/queries";
+import { useCurrentProject, useDeleteProject, useGithubRepos, useReindexProject, useUpdateProject, type Project, type ProjectChange } from "../api/queries";
 import { Button, PageHead } from "../ui/parts";
 import { RepoField, type RepoPick } from "../ui/RepoField";
 import { IndexBanner } from "../ui/IndexBanner";
@@ -23,6 +23,7 @@ function Settings({ project }: { project: Project }) {
   const toast = useToast();
   const update = useUpdateProject(project.id);
   const remove = useDeleteProject(project.id);
+  const reindex = useReindexProject(project.id);
   const github = useGithubRepos();
   const [name, setName] = useState(project.name);
   const [context, setContext] = useState(project.context);
@@ -88,13 +89,11 @@ function Settings({ project }: { project: Project }) {
   return (
     <div className="page" style={{ maxWidth: 820 }}>
       <PageHead eyebrow="Project settings" title={project.name} sub="Changes save as you type. Agents pick up new context on their next task.">
-        <Button
-          disabled
-          title="Re-indexing arrives with the index job (T1.6). Repos you add are indexed when it lands."
-        >
+        <Button disabled={indexing || reindex.isPending} onClick={() => reindex.mutate()}>
           {indexing ? "Indexing…" : "Re-index repos"}
         </Button>
       </PageHead>
+      {reindex.error && <span className="err" role="alert">{reindex.error.message}</span>}
       {indexing && <IndexBanner project={project} />}
       <div className="card pad stack" style={{ gap: 18 }}>
         <div className="fld">

@@ -7,6 +7,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { requireUser } from "../auth";
 import type { AppEnv } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { enqueueIndexes } from "../jobs/index-repo";
 
 const MAX_NAME = 120;
 const MAX_CONTEXT = 20_000;
@@ -19,6 +20,11 @@ const RepoSchema = z
     full_name: z.string(),
     default_branch: z.string(),
     index_state: z.enum(["pending", "indexing", "ready", "failed"]),
+    languages: z.record(z.string(), z.number()),
+    file_count: z.number().int().nullable(),
+    tree_truncated: z.boolean(),
+    indexed_at: z.string().nullable(),
+    index_error: z.string().nullable(),
   })
   .openapi("ProjectRepo");
 
@@ -99,6 +105,14 @@ const deleteRoute = createRoute({
   responses: { 204: { description: "Deleted" }, 401: errors[401], 404: errors[404] },
 });
 
+const reindexRoute = createRoute({
+  method: "post",
+  path: "/api/projects/{id}/reindex",
+  summary: "Index every repository of the project again",
+  request: { params: IdParam },
+  responses: { 200: { description: "The project, with its repos back to pending", content: json(ProjectSchema) }, 401: errors[401], 404: errors[404] },
+});
+
 function cleanName(name: string): string {
   const n = name.trim();
   if (!n) throw AppError.badRequest("project name is required");
@@ -146,7 +160,14 @@ interface RepoRow {
   full_name: string;
   default_branch: string;
   index_state: "pending" | "indexing" | "ready" | "failed";
+  languages: string;
+  file_count: number | null;
+  tree_truncated: number;
+  indexed_at: string | null;
+  index_error: string | null;
 }
+
+const REPO_COLUMNS = "id, project_id, github_repo_id, full_name, default_branch, index_state, languages, file_count, tree_truncated, indexed_at, index_error";
 
 const notFound = (id: string) => AppError.notFound(`project ${id}`);
 
@@ -156,6 +177,11 @@ const toRepo = (r: RepoRow) => ({
   full_name: r.full_name,
   default_branch: r.default_branch,
   index_state: r.index_state,
+  languages: JSON.parse(r.languages) as Record<string, number>,
+  file_count: r.file_count,
+  tree_truncated: r.tree_truncated === 1,
+  indexed_at: r.indexed_at,
+  index_error: r.index_error,
 });
 
 /** One project owned by `owner`, with its repos; 404 when missing or someone else's. */
@@ -167,7 +193,7 @@ async function load(db: D1Database, owner: string, id: string) {
   if (!row) throw notFound(id);
   const { results } = await db
     .prepare(
-      `SELECT id, project_id, github_repo_id, full_name, default_branch, index_state
+      `SELECT ${REPO_COLUMNS}
        FROM project_repos WHERE project_id = ?1 ORDER BY created_at, full_name`,
     )
     .bind(id)
@@ -199,7 +225,7 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
       .all<ProjectRow>();
     const { results: repos } = await db
       .prepare(
-        `SELECT r.id, r.project_id, r.github_repo_id, r.full_name, r.default_branch, r.index_state
+        `SELECT ${REPO_COLUMNS.split(", ").map((c) => `r.${c}`).join(", ")}
          FROM project_repos r JOIN projects p ON p.id = r.project_id
          WHERE p.owner_id = ?1 ORDER BY r.created_at, r.full_name`,
       )
@@ -231,7 +257,9 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
       ),
       ...repos.map((r) => insertRepo(c.env.DB, id, r, now)),
     ]);
-    return c.json(await load(c.env.DB, user.id, id), 201);
+    const project = await load(c.env.DB, user.id, id);
+    await enqueueIndexes(c.env, id, project.repos.map((r) => r.id));
+    return c.json(project, 201);
   });
 
   app.openapi(readRoute, async (c) => {
@@ -249,6 +277,7 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
     await requireProjectOwner(c.env.DB, user.id, id);
 
     const db = c.env.DB;
+    const before = new Set((await db.prepare("SELECT id FROM project_repos WHERE project_id = ?1").bind(id).all<{ id: string }>()).results.map((r) => r.id));
     const now = new Date().toISOString();
     const statements = [
       db
@@ -277,7 +306,24 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
       }
     }
     await db.batch(statements);
-    return c.json(await load(db, user.id, id), 200);
+    const project = await load(db, user.id, id);
+    // Repos that were not there before get indexed; the ones that stayed keep what they have.
+    await enqueueIndexes(c.env, id, project.repos.filter((r) => !before.has(r.id)).map((r) => r.id));
+    return c.json(project, 200);
+  });
+
+  app.openapi(reindexRoute, async (c) => {
+    const user = await requireUser(c);
+    const { id } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, user.id, id);
+    // Repos already waiting or running keep their job; the rest start over.
+    const { results } = await c.env.DB.prepare(
+      "UPDATE project_repos SET index_state = 'pending', index_error = NULL WHERE project_id = ?1 AND index_state IN ('ready', 'failed') RETURNING id",
+    )
+      .bind(id)
+      .all<{ id: string }>();
+    await enqueueIndexes(c.env, id, results.map((r) => r.id));
+    return c.json(await load(c.env.DB, user.id, id), 200);
   });
 
   app.openapi(deleteRoute, async (c) => {

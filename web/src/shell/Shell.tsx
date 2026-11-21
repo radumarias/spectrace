@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { getCurrentProjectId } from "../api/current";
+import { IndexLive } from "../api/live";
 import { useMe, useProjects, useSignOut } from "../api/queries";
 import { useTheme } from "../theme";
 import { Button } from "../ui/parts";
@@ -104,6 +105,8 @@ export function Shell() {
           </div>
         </nav>
       )}
+
+      {projects?.map((p) => <IndexLive key={p.id} project={p} />)}
 
       <main ref={main} tabIndex={-1}>
         <Outlet />

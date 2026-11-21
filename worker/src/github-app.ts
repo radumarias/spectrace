@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import type { AppEnv } from "./env";
+import type { AppEnv, Bindings } from "./env";
 import { AppError } from "./error";
 import { githubConfig } from "./auth";
 
@@ -12,12 +12,25 @@ export interface AppConfig {
 }
 
 export function appConfig(c: Context<AppEnv>): AppConfig {
-  const { GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY } = c.env;
+  const gh = githubConfig(c);
+  return appConfigFromEnv(c.env, gh.oauthUrl, gh.apiUrl);
+}
+
+/** The same config without a request, for queue jobs. */
+export function appConfigFromEnv(env: Bindings): AppConfig;
+export function appConfigFromEnv(env: Bindings, webUrl: string, apiUrl: string): AppConfig;
+export function appConfigFromEnv(env: Bindings, webUrl?: string, apiUrl?: string): AppConfig {
+  const { GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_PRIVATE_KEY } = env;
   if (!GITHUB_APP_ID?.trim() || !GITHUB_APP_SLUG?.trim() || !GITHUB_APP_PRIVATE_KEY?.trim()) {
     throw new AppError("internal", "GitHub App is not configured (GITHUB_APP_ID / GITHUB_APP_SLUG / GITHUB_APP_PRIVATE_KEY)");
   }
-  const gh = githubConfig(c);
-  return { appId: GITHUB_APP_ID.trim(), slug: GITHUB_APP_SLUG.trim(), privateKey: GITHUB_APP_PRIVATE_KEY, webUrl: gh.oauthUrl, apiUrl: gh.apiUrl };
+  return {
+    appId: GITHUB_APP_ID.trim(),
+    slug: GITHUB_APP_SLUG.trim(),
+    privateKey: GITHUB_APP_PRIVATE_KEY,
+    webUrl: webUrl ?? (env.GITHUB_OAUTH_URL ?? "https://github.com").replace(/\/+$/, ""),
+    apiUrl: apiUrl ?? (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, ""),
+  };
 }
 
 const b64url = (bytes: Uint8Array | string): string => {

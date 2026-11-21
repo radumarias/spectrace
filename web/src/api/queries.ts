@@ -83,6 +83,21 @@ export function useUpdateProject(id: string) {
   });
 }
 
+/** Index every repo of the project again (`POST /api/projects/{id}/reindex`). Progress arrives through the live events. */
+export function useReindexProject(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<Project> => {
+      const { data, error } = await api.POST("/api/projects/{id}/reindex", { params: { path: { id } } });
+      if (!data) throw apiError(error, "Could not start re-indexing.");
+      return data;
+    },
+    onSuccess: (project) => {
+      qc.setQueryData<Project[]>(keys.projects, (old) => (old ?? []).map((p) => (p.id === project.id ? project : p)));
+    },
+  });
+}
+
 export function useDeleteProject(id: string) {
   const qc = useQueryClient();
   return useMutation({
