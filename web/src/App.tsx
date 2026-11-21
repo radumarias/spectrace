@@ -5,6 +5,7 @@ import { ProjectHome } from "./pages/ProjectHome";
 import { PullDetail } from "./pages/PullDetail";
 import { ProjectSettings } from "./pages/ProjectSettings";
 import { Projects } from "./pages/Projects";
+import { PullRequests } from "./pages/PullRequests";
 import { RequireAuth } from "./shell/RequireAuth";
 import { Shell } from "./shell/Shell";
 import { TITLES } from "./shell/nav";
@@ -20,8 +21,9 @@ export function App() {
           <Route path="new-project" element={<NewProject />} />
           <Route path="home" element={<ProjectHome />} />
           <Route path="project" element={<ProjectSettings />} />
+          <Route path="prs" element={<PullRequests />} />
           <Route path="pr/:pullId" element={<PullDetail />} />
-          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project"].includes(r)).map((r) => (
+          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project", "prs"].includes(r)).map((r) => (
             <Route key={r} path={r} element={<Page route={r} />} />
           ))}
           <Route path="*" element={<Navigate to="/projects" replace />} />
