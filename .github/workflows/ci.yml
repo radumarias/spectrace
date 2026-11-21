@@ -124,3 +124,58 @@ jobs:
 
       - name: Tests (workerd via Miniflare, no Cloudflare account needed)
         run: npm --prefix worker test
+
+  e2e:
+    name: E2E (Playwright, 1440 and 390 px)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            worker/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-bindgen CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.130
+
+      - name: Build crates/core to WASM
+        run: scripts/build-wasm.sh
+
+      - name: Install dependencies
+        run: |
+          npm --prefix worker ci --no-audit --no-fund
+          npm --prefix web ci --no-audit --no-fund
+
+      - name: Install Chromium with its system libraries
+        run: npm --prefix web exec -- playwright install --with-deps chromium
+
+      - name: Apply local D1 migrations (the Worker's /api/health reads the database)
+        run: npm --prefix worker run migrate:local
+
+      - name: Playwright tests
+        run: npm --prefix web run e2e
+
+      - name: Upload the Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7

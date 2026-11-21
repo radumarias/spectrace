@@ -27,6 +27,11 @@ test: install wasm
     npm --prefix worker test
     npm --prefix web test
 
+# end-to-end tests (Playwright, 1440 and 390 px) against `vite dev` with the Worker and a local D1; see web/e2e
+# first time on a machine: npm --prefix web exec -- playwright install chromium
+e2e: install wasm migrate
+    npm --prefix web run e2e
+
 # format check, clippy, and type check plus eslint for the Worker and the web app
 lint: install wasm
     cargo fmt --all -- --check
