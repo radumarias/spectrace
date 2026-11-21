@@ -29,3 +29,7 @@ lint: install
     cargo clippy --workspace --all-targets -- -D warnings
     npm --prefix worker run lint
     npm --prefix web run lint
+
+# deploy the Worker, D1 migrations and web app to Cloudflare (see docs/deploy.md)
+deploy:
+    scripts/deploy.sh
