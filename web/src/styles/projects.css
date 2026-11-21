@@ -1,0 +1,23 @@
+/* projects */
+.shell.root{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"top top" "main ask"}
+.proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
+.proj{padding:16px;display:flex;flex-direction:column;gap:12px;cursor:pointer;text-decoration:none;color:var(--fg);transition:border-color .15s}
+.proj:hover{border-color:var(--accent)}
+.proj.add{border-style:dashed;align-items:center;justify-content:center;color:var(--accent);min-height:200px;background:transparent}
+.mark{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font:700 16px var(--f-display);background:var(--accent-soft);color:var(--accent);flex:none}
+.clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.repo-chip{display:inline-flex;align-items:center;gap:4px;font:500 12px var(--f-mono);background:var(--sunk);border-radius:6px;padding:4px 8px;min-height:28px;max-width:100%;overflow-wrap:anywhere}
+.repo-chip button{border:0;background:transparent;color:var(--muted);min-width:24px;min-height:24px;border-radius:4px;font-size:15px;line-height:1;margin-right:-4px}
+.repo-chip button:hover{color:var(--bad);background:var(--surface)}
+.fld label{font-weight:600;color:var(--fg);font-size:13px}
+.fld textarea{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:10px;font:inherit;font-size:13.5px;line-height:1.5;width:100%;resize:vertical;min-height:110px}
+.fld textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.err{color:var(--bad);font-size:12.5px}
+.pr-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 14px;padding:14px 16px;align-items:center;text-decoration:none;color:var(--fg);animation:pop .2s ease-out}
+.pr-row:hover{border-color:var(--accent)}
+.pr-row .meta{font:500 11.5px var(--f-mono);color:var(--muted);overflow-wrap:anywhere}
+.side .back{min-height:34px;font-size:13px}
+.side-proj{display:flex;align-items:center;gap:10px;padding:8px 10px 4px}
+.side-proj .mark{width:32px;height:32px;font-size:14px}
+.side-proj b{font:600 14.5px var(--f-display);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+

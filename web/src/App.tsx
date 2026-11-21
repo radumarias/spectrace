@@ -1,17 +1,21 @@
-import { useEffect, useState } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { Page } from "./pages/Page";
+import { Shell } from "./shell/Shell";
+import { TITLES } from "./shell/nav";
+import { ToastProvider } from "./ui/Toast";
 
 export function App() {
-  const [status, setStatus] = useState("checking…");
-  useEffect(() => {
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((j: { status: string }) => setStatus(j.status))
-      .catch(() => setStatus("server not reachable"));
-  }, []);
   return (
-    <main style={{ fontFamily: "system-ui", padding: 16 }}>
-      <h1>spectrace</h1>
-      <p>Server: {status}</p>
-    </main>
+    <ToastProvider>
+      <Routes>
+        <Route element={<Shell />}>
+          <Route index element={<Navigate to="/projects" replace />} />
+          {Object.keys(TITLES).map((r) => (
+            <Route key={r} path={r} element={<Page route={r} />} />
+          ))}
+          <Route path="*" element={<Navigate to="/projects" replace />} />
+        </Route>
+      </Routes>
+    </ToastProvider>
   );
 }

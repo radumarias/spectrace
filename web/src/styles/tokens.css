@@ -1,0 +1,20 @@
+/* Design tokens, copied from the prototype. Colours in the app come only from these. */
+:root{
+  --bg:#F4F7F7;--surface:#FFFFFF;--sunk:#EAF0F0;--fg:#122125;--muted:#4F6166;--line:#D0DBDC;
+  --accent:#0B7A75;--accent-soft:#DCEFED;--on-accent:#FFFFFF;
+  --warn:#8A4F04;--warn-soft:#FBEBD2;--ok:#1B6A32;--ok-soft:#DCF1E1;--bad:#A51F2A;--bad-soft:#F9DFE1;--idle:#5E6E74;--idle-soft:#E9EEEF;
+  --shadow:0 18px 40px -26px rgba(10,40,40,.5);
+  --f-display:"Space Grotesk","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0D1416;--surface:#141D20;--sunk:#0F181A;--fg:#E2ECEE;--muted:#98AAB0;--line:#25353A;
+  --accent:#3FC1B8;--accent-soft:#11312F;--on-accent:#06201E;
+  --warn:#E9A94C;--warn-soft:#382811;--ok:#5CCB7D;--ok-soft:#132E1C;--bad:#F2727C;--bad-soft:#381619;--idle:#8A9AA0;--idle-soft:#1B272A;
+  --shadow:0 18px 40px -22px rgba(0,0,0,.85);color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D1416;--surface:#141D20;--sunk:#0F181A;--fg:#E2ECEE;--muted:#98AAB0;--line:#25353A;
+  --accent:#3FC1B8;--accent-soft:#11312F;--on-accent:#06201E;
+  --warn:#E9A94C;--warn-soft:#382811;--ok:#5CCB7D;--ok-soft:#132E1C;--bad:#F2727C;--bad-soft:#381619;--idle:#8A9AA0;--idle-soft:#1B272A;
+  --shadow:0 18px 40px -22px rgba(0,0,0,.85);color-scheme:dark}
