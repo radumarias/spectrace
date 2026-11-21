@@ -1,0 +1,5 @@
+.signin{min-height:100dvh;display:grid;place-items:center;padding:16px;color:var(--muted)}
+.signin-card{width:100%;max-width:360px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:12px}
+.signin-card h1{font:600 22px var(--f-display);color:var(--fg)}
+.signin-card .btn{text-decoration:none;justify-content:center}
+.avatar img{width:100%;height:100%;border-radius:50%;object-fit:cover}

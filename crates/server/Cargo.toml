@@ -23,6 +23,7 @@ sha2 = "0.10"
 hex = "0.4"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+utoipa = { version = "5", features = ["uuid"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

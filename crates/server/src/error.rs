@@ -1,5 +1,19 @@
 use axum::{http::StatusCode, response::IntoResponse, response::Response, Json};
+use serde::Serialize;
 use serde_json::json;
+use utoipa::ToSchema;
+
+/// Error body: `{"error": {"code", "message"}}`.
+#[derive(Serialize, ToSchema)]
+pub struct ErrorBody {
+    pub error: ErrorDetail,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ErrorDetail {
+    pub code: String,
+    pub message: String,
+}
 
 /// The one error type for the server. Handlers return `Result<_, AppError>`
 /// and every variant maps to a JSON body `{"error": {"code", "message"}}`.

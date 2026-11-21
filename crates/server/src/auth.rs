@@ -16,8 +16,9 @@ use axum::{
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use utoipa::ToSchema;
 
-use crate::{config::GithubOAuth, AppError, AppState};
+use crate::{config::GithubOAuth, error::ErrorBody, AppError, AppState};
 
 pub const SESSION_COOKIE: &str = "spectrace_session";
 const STATE_COOKIE: &str = "spectrace_oauth_state";
@@ -33,7 +34,7 @@ pub fn router() -> Router<AppState> {
 }
 
 /// The signed-in user, as returned by `/api/me`.
-#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, sqlx::FromRow, ToSchema)]
 pub struct User {
     pub id: uuid::Uuid,
     pub github_id: i64,
@@ -103,7 +104,13 @@ fn set_cookie(
     .map_err(|e| AppError::Internal(format!("bad cookie: {e}")))
 }
 
-async fn login(State(state): State<AppState>) -> Result<Response, AppError> {
+#[utoipa::path(
+    get,
+    path = "/api/auth/github/login",
+    tag = "auth",
+    responses((status = 303, description = "Redirect to GitHub; sets a short-lived state cookie"))
+)]
+pub async fn login(State(state): State<AppState>) -> Result<Response, AppError> {
     let gh = github(&state)?;
     let oauth_state = random_token();
     let mut url = reqwest::Url::parse(&format!("{}/login/oauth/authorize", gh.oauth_url))
@@ -129,8 +136,8 @@ async fn login(State(state): State<AppState>) -> Result<Response, AppError> {
     Ok(res)
 }
 
-#[derive(Deserialize)]
-struct CallbackParams {
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct CallbackParams {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
@@ -150,7 +157,17 @@ struct GithubUser {
     avatar_url: Option<String>,
 }
 
-async fn callback(
+#[utoipa::path(
+    get,
+    path = "/api/auth/github/callback",
+    tag = "auth",
+    params(CallbackParams),
+    responses(
+        (status = 303, description = "Session started; redirect to /"),
+        (status = 400, description = "Bad or missing code or state", body = ErrorBody),
+    )
+)]
+pub async fn callback(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<CallbackParams>,
@@ -251,11 +268,29 @@ async fn callback(
     Ok(res)
 }
 
-async fn me(user: User) -> Json<User> {
+#[utoipa::path(
+    get,
+    path = "/api/me",
+    tag = "auth",
+    responses(
+        (status = 200, description = "The signed-in user", body = User),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+    )
+)]
+pub async fn me(user: User) -> Json<User> {
     Json(user)
 }
 
-async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Result<Response, AppError> {
+#[utoipa::path(
+    post,
+    path = "/api/auth/logout",
+    tag = "auth",
+    responses((status = 204, description = "Session ended and cookie cleared"))
+)]
+pub async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
     if let Some(token) = cookie(&headers, SESSION_COOKIE) {
         sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
             .bind(hash_token(&token))

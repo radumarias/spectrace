@@ -31,3 +31,9 @@ lint:
     cargo clippy --workspace --all-targets -- -D warnings
     npm --prefix web install --no-audit --no-fund
     npm --prefix web run lint
+
+# regenerate web/openapi.json and the typed client (web/src/api/schema.d.ts); run after changing a handler's annotations
+api-client:
+    cargo run -q -p spectrace-server --example openapi > web/openapi.json
+    npm --prefix web install --no-audit --no-fund
+    npm --prefix web run api-client

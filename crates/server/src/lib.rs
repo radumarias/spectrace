@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod openapi;
 pub mod routes;
 
 use axum::Router;
@@ -43,6 +44,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .merge(routes::router())
         .merge(auth::router())
+        .merge(openapi::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
