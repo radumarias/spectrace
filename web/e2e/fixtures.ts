@@ -16,6 +16,8 @@ export type ApiAnswer =
  * mock shows up in the test instead of being silently ignored. Call before `page.goto`.
  */
 export async function mockApi(page: Page, answers: Record<string, ApiAnswer>) {
+  // The shell listens to the project's event socket. Quiet by default; a spec that cares routes it again after calling mockApi (the last matching route wins).
+  await page.routeWebSocket(/\/api\/projects\/[^/]+\/events/, () => {});
   await page.route((url) => url.pathname.startsWith("/api/"), async (route: Route) => {
     const req = route.request();
     const path = new URL(req.url()).pathname;

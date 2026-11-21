@@ -199,3 +199,67 @@ it("shows the check runs and a summary of them", async () => {
   expect(within(screen.getByText("E2E").closest("li")!).getByText("running")).toBeTruthy();
   expect(within(screen.getByText("Rust").closest("li")!).getByText("passed")).toBeTruthy();
 });
+
+/** A WebSocket the test can push project events through. */
+class FakeSocket {
+  static all: FakeSocket[] = [];
+  onmessage: ((m: { data: string }) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  seq = 0;
+  constructor(public url: string) {
+    FakeSocket.all.push(this);
+  }
+  close() {}
+  push(event: string, data: Record<string, unknown> = {}) {
+    this.onmessage?.({ data: JSON.stringify({ id: ++this.seq, projectId: "p1", jobId: "wh-1", event, data, createdAt: "x" }) });
+  }
+}
+
+it("refreshes the open pull request when a webhook changes it, without a reload", async () => {
+  FakeSocket.all = [];
+  vi.stubGlobal("WebSocket", FakeSocket);
+  server(PULL);
+  // The server above answers from its own copy; swap the title there by mutating what it returns.
+  const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+  const original = fetchMock.getMockImplementation() as (input: Request | string, init?: RequestInit) => Promise<Response>;
+  let title = PULL.title;
+  fetchMock.mockImplementation(async (input: Request | string, init?: RequestInit) => {
+    const res = await original(input, init);
+    const url = new URL(input instanceof Request ? input.url : input, "http://x");
+    if (url.pathname === "/api/projects/p1/pulls/pr-1") return Response.json({ ...(await res.json()), title });
+    return res;
+  });
+  at("/pr/pr-1");
+  expect(await screen.findByRole("heading", { name: PULL.title })).toBeTruthy();
+  await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+  expect(FakeSocket.all[0]!.url).toContain("/api/projects/p1/events");
+
+  title = "Checkout: show the decline reason";
+  FakeSocket.all[0]!.push("pr.updated", { repo: "acme/shop", number: 58, cause: "pull_request.edited" });
+  expect(await screen.findByRole("heading", { name: "Checkout: show the decline reason" })).toBeTruthy();
+});
+
+it("reconnects with a growing wait and catches up on what it missed", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    FakeSocket.all = [];
+    vi.stubGlobal("WebSocket", FakeSocket);
+    server(PULL);
+    at("/pr/pr-1");
+    await screen.findByRole("heading", { name: PULL.title });
+    await vi.waitFor(() => expect(FakeSocket.all).toHaveLength(1));
+    FakeSocket.all[0]!.push("pr.updated");
+    FakeSocket.all[0]!.onclose?.();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeSocket.all).toHaveLength(2);
+    expect(FakeSocket.all[1]!.url).toContain("?after=1"); // resumes after the last event seen
+    FakeSocket.all[1]!.onclose?.(); // still down: wait doubles
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(FakeSocket.all).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(FakeSocket.all).toHaveLength(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});

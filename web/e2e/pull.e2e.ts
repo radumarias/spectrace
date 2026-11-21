@@ -39,3 +39,43 @@ test("a pull request shows its header, description and files", async ({ page }) 
   await expectNoHorizontalScroll(page);
   expect(errors).toEqual([]);
 });
+
+// T2.7: a webhook changes the pull request, the project's event socket says so, and the open page follows without a reload.
+test("an open pull request page follows a webhook without a reload", async ({ page }) => {
+  let current = PULL;
+  await mockApi(page, {
+    "/api/me": USER,
+    "/api/projects": [PROJECT],
+    "/api/projects/p1/pulls": { pulls: [PULL], counts: { needs: 1, open: 1, merged: 0 } },
+    "/api/projects/p1/pulls/pr-1": () => current,
+    "/api/projects/p1/pulls/pr-1/reviews": { reviews: [] },
+    "/api/projects/p1/pulls/pr-1/diff": { files: [] },
+  });
+  let seq = 0;
+  // React's dev double-mount opens the socket twice and closes the first, so always talk to the newest one.
+  let newest: { send: (message: string) => void } | undefined;
+  await page.routeWebSocket(/\/api\/projects\/p1\/events/, (ws) => {
+    newest = ws;
+  });
+  await page.addInitScript(() => localStorage.setItem("spectrace-proj", "p1"));
+  const errors = trackErrors(page);
+
+  await page.goto("/pr/pr-1");
+  await expect(page.getByRole("heading", { name: PULL.title })).toBeVisible();
+  await expect(page.getByText("no checks")).toBeVisible();
+
+  // CI finishes on GitHub: the check_run webhook is stored and announced.
+  current = {
+    ...PULL,
+    title: "Checkout: show the decline reason",
+    checksState: "passing",
+    checks: [{ name: "Web (tsc, vitest)", status: "completed", conclusion: "success", url: "", startedAt: null, completedAt: null }],
+  } as typeof PULL;
+  await expect.poll(() => newest).toBeDefined();
+  newest!.send(JSON.stringify({ id: ++seq, projectId: "p1", jobId: "wh-1", event: "pr.updated", data: { repo: "acme/shop", number: 58, cause: "check_run.completed" }, createdAt: "2026-11-21T12:00:00Z" }));
+
+  await expect(page.getByRole("heading", { name: "Checkout: show the decline reason" })).toBeVisible();
+  await expect(page.getByText("checks passing")).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});
