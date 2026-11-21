@@ -3,6 +3,7 @@ import type { AppEnv } from "./env";
 import { AppError, errorResponse } from "./error";
 import { log } from "./log";
 import { registerAuth } from "./routes/auth";
+import { registerGithub } from "./routes/github";
 import { registerHealth } from "./routes/health";
 import { registerJobs } from "./routes/jobs";
 import { registerProjects } from "./routes/projects";
@@ -31,6 +32,7 @@ export function createApp() {
 
   registerHealth(app);
   registerAuth(app);
+  registerGithub(app);
   registerProjects(app);
   registerJobs(app);
 

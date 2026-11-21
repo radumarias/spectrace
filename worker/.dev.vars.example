@@ -5,3 +5,8 @@ GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 # Where the browser reaches the app; the callback is PUBLIC_URL + /api/auth/github/callback
 PUBLIC_URL=http://localhost:5173
+# GitHub App (see README, "GitHub App"). Its Client ID/secret can be the two above.
+GITHUB_APP_ID=
+GITHUB_APP_SLUG=
+# The .pem, on one line with \n for line breaks
+GITHUB_APP_PRIVATE_KEY=
