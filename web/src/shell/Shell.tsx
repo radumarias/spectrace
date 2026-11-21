@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { useMe, useSignOut } from "../api/queries";
 import { useTheme } from "../theme";
 import { Button } from "../ui/parts";
 import { Icon } from "../ui/Icon";
@@ -18,6 +19,8 @@ export function Shell() {
   const { theme, toggle } = useTheme();
   const [askOpen, setAskOpen] = useState(false);
   const main = useRef<HTMLElement>(null);
+  const me = useMe().data;
+  const signOut = useSignOut();
 
   useEffect(() => {
     if (main.current) main.current.scrollTop = 0;
@@ -52,7 +55,17 @@ export function Shell() {
         <Button variant="primary" small aria-expanded={askOpen} aria-controls="ask" onClick={() => setAskOpen((o) => !o)}>
           <span className="lab">Ask the </span>coordinator
         </Button>
-        <span className="avatar" aria-label="Signed in as RM">RM</span>
+        {me && (
+          <button
+            type="button"
+            className="avatar"
+            title={`Signed in as ${me.login}. Click to sign out.`}
+            aria-label={`Signed in as ${me.login}. Sign out`}
+            onClick={() => signOut.mutate()}
+          >
+            {me.avatar_url ? <img src={me.avatar_url} alt="" /> : me.login.slice(0, 2).toUpperCase()}
+          </button>
+        )}
       </header>
 
       {!root && (

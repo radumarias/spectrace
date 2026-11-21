@@ -1,11 +1,12 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppEnv } from "../env";
+import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
 import { log } from "../log";
 import { emit, type JobRow } from "../jobs/queue";
+import { requireProjectOwner } from "./projects";
 
-// T1.1 will check that the project exists (and that the caller may see it) here.
 const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
 const JobParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "jobId", in: "path" } });
 
@@ -42,6 +43,7 @@ function toJob(r: JobRow): z.infer<typeof Job> {
 }
 
 const errors = {
+  401: { description: "Not signed in", content: { "application/json": { schema: ErrorBody } } },
   400: { description: "Invalid request", content: { "application/json": { schema: ErrorBody } } },
   404: { description: "Not found", content: { "application/json": { schema: ErrorBody } } },
 };
@@ -49,7 +51,7 @@ const errors = {
 const enqueue = createRoute({
   method: "post",
   path: "/api/projects/{projectId}/jobs",
-  summary: "Queue a job for a project",
+  summary: "Queue a job for a project (owner only)",
   request: {
     params: z.object({ projectId: ProjectParam }),
     body: {
@@ -67,6 +69,8 @@ const enqueue = createRoute({
   responses: {
     202: { description: "Queued", content: { "application/json": { schema: Job } } },
     400: errors[400],
+    401: errors[401],
+    404: errors[404],
     502: { description: "The queue is unavailable", content: { "application/json": { schema: ErrorBody } } },
   },
 });
@@ -76,7 +80,11 @@ const list = createRoute({
   path: "/api/projects/{projectId}/jobs",
   summary: "The project's 50 most recent jobs",
   request: { params: z.object({ projectId: ProjectParam }) },
-  responses: { 200: { description: "Jobs, newest first", content: { "application/json": { schema: z.object({ jobs: z.array(Job) }) } } } },
+  responses: {
+    200: { description: "Jobs, newest first", content: { "application/json": { schema: z.object({ jobs: z.array(Job) }) } } },
+    401: errors[401],
+    404: errors[404],
+  },
 });
 
 const get = createRoute({
@@ -84,7 +92,7 @@ const get = createRoute({
   path: "/api/projects/{projectId}/jobs/{jobId}",
   summary: "One job",
   request: { params: z.object({ projectId: ProjectParam, jobId: JobParam }) },
-  responses: { 200: { description: "The job", content: { "application/json": { schema: Job } } }, 404: errors[404] },
+  responses: { 200: { description: "The job", content: { "application/json": { schema: Job } } }, 401: errors[401], 404: errors[404] },
 });
 
 const events = createRoute({
@@ -95,12 +103,13 @@ const events = createRoute({
     "Upgrade to a WebSocket. Each text frame is one JSON event `{id, projectId, jobId, event, data, createdAt}`. " +
     "Pass `after=<last event id>` to replay what was missed; without it, only new events are sent.",
   request: { params: z.object({ projectId: ProjectParam }), query: z.object({ after: z.coerce.number().int().min(0).optional() }) },
-  responses: { 101: { description: "Switching protocols" }, 400: errors[400] },
+  responses: { 101: { description: "Switching protocols" }, 400: errors[400], 401: errors[401], 404: errors[404] },
 });
 
 export function registerJobs(app: OpenAPIHono<AppEnv>) {
   app.openapi(enqueue, async (c) => {
     const { projectId } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
     const body = c.req.valid("json");
     const id = crypto.randomUUID();
     const row = await c.env.DB.prepare("INSERT INTO jobs (id, project_id, kind, target, max_attempts) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING *")
@@ -121,12 +130,14 @@ export function registerJobs(app: OpenAPIHono<AppEnv>) {
 
   app.openapi(list, async (c) => {
     const { projectId } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
     const { results } = await c.env.DB.prepare("SELECT * FROM jobs WHERE project_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 50").bind(projectId).all<JobRow>();
     return c.json({ jobs: results.map(toJob) }, 200);
   });
 
   app.openapi(get, async (c) => {
     const { projectId, jobId } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
     const row = await c.env.DB.prepare("SELECT * FROM jobs WHERE id = ?1 AND project_id = ?2").bind(jobId, projectId).first<JobRow>();
     if (!row) throw AppError.notFound(`job ${jobId}`);
     return c.json(toJob(row), 200);
@@ -135,6 +146,7 @@ export function registerJobs(app: OpenAPIHono<AppEnv>) {
   app.openapi(events, async (c) => {
     const { projectId } = c.req.valid("param");
     const { after } = c.req.valid("query");
+    await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
     if (c.req.header("upgrade")?.toLowerCase() !== "websocket") throw AppError.badRequest("expected a WebSocket upgrade");
     const url = new URL(`http://hub/${encodeURIComponent(projectId)}`);
     if (after !== undefined) url.searchParams.set("after", String(after));

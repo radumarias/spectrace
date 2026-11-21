@@ -3,11 +3,9 @@
 -- `job_events`, which is the job log, the live progress feed (via the
 -- ProjectHub Durable Object) and the replay source for reconnecting clients.
 --
--- Numbered 0003 so it sits after T0.8's 0002 (sign-in).
+-- Numbered 0003, after T0.8 (0010) and before T1.1 (0020); see 0021 for the foreign keys.
 --
--- `project_id` has no foreign key yet: the projects table arrives with T1.1.
--- T1.1 must rebuild `jobs` and `job_events` with `REFERENCES projects (id)
--- ON DELETE CASCADE` in its own migration (D1 is SQLite: no ADD CONSTRAINT).
+-- `project_id` has no foreign key here (projects did not exist yet); 0021 adds them.
 CREATE TABLE jobs (
     id           TEXT PRIMARY KEY,
     project_id   TEXT NOT NULL,
