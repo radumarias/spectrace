@@ -9,6 +9,8 @@
 import type { Bindings } from "../env";
 import { AppError } from "../error";
 import { appConfigFromEnv, ghHeaders, installationToken, linkRepoInstallation, type AppConfig } from "../github-app";
+import { checkRunStatement, type GhCheckRun } from "../checks";
+import { log } from "../log";
 import { pullStatements, type GhFile, type GhPull } from "../pulls";
 import { PermanentError, registerHandler, type JobHandler } from "./queue";
 
@@ -18,6 +20,7 @@ const PAGE_SIZE = 100;
 const MAX_FILE_PAGES = 30;
 /** How many pages (of 100) of recently closed PRs a sync reads. */
 const RECENT_CLOSED_PAGES = 1;
+const MAX_CHECK_PAGES = 5;
 
 interface RepoRow {
   id: string;
@@ -41,6 +44,29 @@ async function ghPages<T>(app: AppConfig, token: string, what: string, path: str
     if (batch.length < PAGE_SIZE) break;
   }
   return out;
+}
+
+/**
+ * Copy the check runs of a commit. Never fails the sync: the App may lack the
+ * "Checks: read" permission, and the `check_run` webhook keeps them current anyway.
+ */
+async function syncChecks(env: Bindings, app: AppConfig, token: string, repo: RepoRow, sha: string): Promise<void> {
+  try {
+    const runs: GhCheckRun[] = [];
+    for (let page = 1; page <= MAX_CHECK_PAGES; page++) {
+      const res = await fetch(`${app.apiUrl}/repos/${repo.full_name}/commits/${sha}/check-runs?per_page=${PAGE_SIZE}&page=${page}`, { headers: ghHeaders(token) });
+      if (!res.ok) {
+        log("warn", "sync could not read check runs", { repo: repo.full_name, sha, status: res.status }, env.LOG_FORMAT);
+        return;
+      }
+      const batch = ((await res.json()) as { check_runs?: GhCheckRun[] }).check_runs ?? [];
+      runs.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+    }
+    if (runs.length > 0) await env.DB.batch(runs.map((r) => checkRunStatement(env, repo.id, { ...r, head_sha: sha })));
+  } catch (error) {
+    log("warn", "sync could not read check runs", { repo: repo.full_name, sha, error: String(error) }, env.LOG_FORMAT);
+  }
 }
 
 /** The installation that owns a repo: one of the project owner's installations on the repo's account. */
@@ -96,6 +122,7 @@ async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: 
     const files = before?.files_sha === pr.head.sha ? null : await ghPages<GhFile>(app, token, `files of ${repo.full_name}#${pr.number}`, `/repos/${repo.full_name}/pulls/${pr.number}/files`, MAX_FILE_PAGES);
     // One batch is one transaction: a PR never shows half its files.
     await env.DB.batch(pullStatements(env, repo.id, before?.id ?? crypto.randomUUID(), pr, files));
+    await syncChecks(env, app, token, repo, pr.head.sha);
     await progress(pr.number);
   }
 

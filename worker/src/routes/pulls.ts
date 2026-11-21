@@ -5,6 +5,7 @@ import type { AppEnv, Bindings } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
 import { appConfigFromEnv, ghHeaders, installationToken } from "../github-app";
+import { checkRunsOf, checksState } from "../checks";
 import { enqueueJob, type JobRow } from "../jobs/queue";
 import { installationFor, SYNC_KIND } from "../jobs/sync";
 import { Job, toJob } from "./jobs";
@@ -46,7 +47,24 @@ const PullFile = z
   })
   .openapi("PullFile");
 
-const PullDetail = Pull.extend({ body: z.string(), headSha: z.string(), files: z.array(PullFile) }).openapi("PullDetail");
+const CheckRun = z
+  .object({
+    name: z.string(),
+    status: z.enum(["queued", "in_progress", "completed"]),
+    conclusion: z.string().nullable().openapi({ description: "GitHub's: success, failure, neutral, cancelled, skipped, timed_out, action_required, stale; null until completed." }),
+    url: z.string(),
+    startedAt: z.string().nullable(),
+    completedAt: z.string().nullable(),
+  })
+  .openapi("CheckRun");
+
+const PullDetail = Pull.extend({
+  body: z.string(),
+  headSha: z.string(),
+  files: z.array(PullFile),
+  checks: z.array(CheckRun).openapi({ description: "CI check runs of the head commit, failures first." }),
+  checksState: z.enum(["none", "pending", "passing", "failing"]).openapi({ description: "`none` when no check run is stored (not synced, or the repo has no CI)." }),
+}).openapi("PullDetail");
 
 const Counts = z
   .object({ needs: z.number().int(), open: z.number().int(), merged: z.number().int() })
@@ -71,6 +89,7 @@ const where = (filter: "needs" | "open" | "merged" | "all", user: number) => ({ 
 
 interface PullRow {
   id: string;
+  repo_id: string;
   repo: string;
   number: number;
   title: string;
@@ -392,6 +411,7 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
       .bind(pullId)
       .all<{ path: string; status: string; previous_path: string | null; additions: number; deletions: number }>();
     const files = results.map((f) => ({ path: f.path, status: f.status, previousPath: f.previous_path, additions: f.additions, deletions: f.deletions }));
-    return c.json({ ...toPull(row), body: row.body, headSha: row.head_sha, files }, 200);
+    const checks = await checkRunsOf(c.env, row.repo_id, row.head_sha);
+    return c.json({ ...toPull(row), body: row.body, headSha: row.head_sha, files, checks, checksState: checksState(checks) }, 200);
   });
 }

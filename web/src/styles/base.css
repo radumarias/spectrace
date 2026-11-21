@@ -130,3 +130,7 @@ figcaption{font:400 10px var(--f-mono);color:var(--muted)}
 .md table{border-collapse:collapse;display:block;overflow-x:auto}
 .md th,.md td{border:1px solid var(--line);padding:4px 8px}
 .md input[type=checkbox]{margin-right:6px}
+
+.checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:13px}
+.checks li{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.checks a,.checks span:first-child{min-width:0;overflow-wrap:anywhere}

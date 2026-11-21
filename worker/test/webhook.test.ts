@@ -8,6 +8,8 @@ import reviewSubmitted from "./recorded/webhooks/pull_request_review-submitted.j
 import reviewDismissed from "./recorded/webhooks/pull_request_review-dismissed.json";
 import suiteRequested from "./recorded/webhooks/check_suite-requested.json";
 import suiteCompleted from "./recorded/webhooks/check_suite-completed.json";
+import runInProgress from "./recorded/webhooks/check_run-in_progress.json";
+import runCompleted from "./recorded/webhooks/check_run-completed.json";
 import pushFeature from "./recorded/webhooks/push-feature.json";
 import pushMain from "./recorded/webhooks/push-main.json";
 
@@ -183,6 +185,21 @@ describe("webhook events", () => {
     // A suite for a commit no stored PR has is kept (its PR may arrive later) but announces nothing.
     await deliver("check_suite", { ...suiteCompleted, check_suite: { ...suiteCompleted.check_suite, id: 778, head_sha: "zzz999" } }, repo);
     expect(await liveEvents(repo.projectId)).toHaveLength(3);
+  });
+
+  it("records check runs, never moves one backwards, and tells watchers of the PRs on that commit", async () => {
+    const repo = await setup();
+    await deliver("pull_request", synchronize, repo); // head is ccc333
+    await deliver("check_run", runInProgress, repo);
+    await deliver("check_run", runCompleted, repo);
+    await deliver("check_run", runInProgress, repo); // late duplicate of the first one
+    const runs = (await env.DB.prepare("SELECT name, status, conclusion, completed_at FROM pr_check_runs WHERE repo_id = ?1").bind(repo.repoId).all()).results;
+    expect(runs).toEqual([{ name: "Web (tsc, vitest)", status: "completed", conclusion: "failure", completed_at: "2026-11-19T12:09:00Z" }]);
+    expect((await liveEvents(repo.projectId)).map(([e, d]) => [e, (d as { cause: string }).cause])).toEqual([
+      ["pr.updated", "pull_request.synchronize"],
+      ["pr.updated", "check_run.created"],
+      ["pr.updated", "check_run.completed"],
+    ]);
   });
 
   it("moves the head of a PR when its branch is pushed, and queues a sync for the files", async () => {
