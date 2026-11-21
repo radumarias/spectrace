@@ -28,4 +28,10 @@ lint: install
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets -- -D warnings
     npm --prefix worker run lint
+    npm --prefix worker run -s openapi -- --check
     npm --prefix web run lint
+
+# regenerate web/openapi.json and the typed client (web/src/api/schema.d.ts) from the Worker's routes; run after changing a route
+api-client: install
+    npm --prefix worker run -s openapi > web/openapi.json
+    npm --prefix web run api-client

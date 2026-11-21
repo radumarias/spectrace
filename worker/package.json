@@ -8,7 +8,8 @@
     "types": "wrangler types",
     "migrate:local": "wrangler d1 migrations apply DB --local",
     "lint": "tsc --noEmit && eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "openapi": "tsx scripts/openapi.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",
@@ -21,6 +22,7 @@
     "@eslint/js": "^9.9.0",
     "eslint": "^9.9.0",
     "globals": "^15.9.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.5.4",
     "typescript-eslint": "^8.3.0",
     "vitest": "^5.1.1",
