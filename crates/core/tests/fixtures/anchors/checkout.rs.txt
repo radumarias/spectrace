@@ -1,0 +1,34 @@
+//! Checkout payment handling.
+
+// @flow checkout.pay
+/// Charges the card.
+#[spec("checkout.paid")]
+pub fn pay(cart: &Cart) -> Result<Receipt, PayError> {
+    // @flow checkout.failed
+    charge(cart)
+}
+
+#[spec("checkout.failed", "checkout.refunded")]
+pub fn fail(cart: &Cart) {}
+
+// #[spec("checkout.ignored")]
+fn not_an_anchor() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[spec("checkout.paid")]
+    #[test]
+    fn pays() {}
+
+    // @spec checkout.failed
+    fn helper_in_test_module() {}
+}
+
+#[spec("cart.add")]
+#[tokio::test]
+async fn adds_to_cart() {}
+
+/* @spec cart.remove */
+fn remove() {}

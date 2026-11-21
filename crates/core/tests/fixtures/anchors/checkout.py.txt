@@ -1,0 +1,34 @@
+# @flow checkout.pay
+def pay(cart):
+    # @spec checkout.paid
+    return charge(cart)
+
+
+@spec("checkout.failed")
+def fail(cart):
+    pass
+
+
+@spec("checkout.refunded", "cart.remove")
+class Refund:
+    pass
+
+
+# @spec checkout.paid
+def test_pays():
+    pass
+
+
+class TestFailure:
+    # @flow checkout.failed
+    def helper(self):
+        pass
+
+
+# @spec cart.add
+@pytest.mark.slow
+async def test_adds():
+    pass
+
+
+after = 1  # @spec cart.after

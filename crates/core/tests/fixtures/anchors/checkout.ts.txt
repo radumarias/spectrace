@@ -1,0 +1,24 @@
+// @flow checkout.pay
+export function pay(cart: Cart): Receipt {
+  // @spec checkout.paid
+  return charge(cart);
+}
+
+@spec("checkout.failed")
+export class Failure {}
+
+/**
+ * @spec checkout.refunded.
+ */
+export function refund() {}
+
+// @spec checkout.paid
+describe("pay", () => {
+  // @spec checkout.failed
+  it("fails", () => {});
+});
+
+// @spec cart.add
+test("adds", () => {});
+
+const url = "http://example.com/@flow-not-an-anchor";
