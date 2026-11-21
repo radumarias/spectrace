@@ -9,6 +9,10 @@ pub enum AppError {
     NotFound(String),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+    #[error("bad gateway: {0}")]
+    Upstream(String),
     #[error("configuration error: {0}")]
     Config(String),
     #[error("database error: {0}")]
@@ -24,6 +28,8 @@ impl AppError {
         match self {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::Upstream(_) => StatusCode::BAD_GATEWAY,
             Self::Database(_) | Self::Migrate(_) | Self::Config(_) | Self::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -34,6 +40,8 @@ impl AppError {
         match self {
             Self::NotFound(_) => "not_found",
             Self::BadRequest(_) => "bad_request",
+            Self::Unauthorized(_) => "unauthorized",
+            Self::Upstream(_) => "upstream",
             Self::Config(_) => "config",
             Self::Database(_) => "database",
             Self::Migrate(_) => "migration",

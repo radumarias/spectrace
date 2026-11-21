@@ -9,7 +9,7 @@ use tower::ServiceExt;
 
 #[sqlx::test]
 async fn health_returns_ok(pool: PgPool) {
-    let res = app(AppState { db: pool })
+    let res = app(AppState::new(pool, None))
         .oneshot(Request::get("/api/health").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -31,7 +31,7 @@ async fn migrations_applied(pool: PgPool) {
 
 #[sqlx::test]
 async fn unknown_route_is_404(pool: PgPool) {
-    let res = app(AppState { db: pool })
+    let res = app(AppState::new(pool, None))
         .oneshot(Request::get("/api/nope").body(Body::empty()).unwrap())
         .await
         .unwrap();
