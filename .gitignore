@@ -5,3 +5,8 @@ web/dist
 .wrangler
 worker/wrangler.deploy.toml
 worker/src/wasm
+
+# Playwright
+web/playwright-report
+web/test-results
+web/blob-report
