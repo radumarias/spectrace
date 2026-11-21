@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { useMe, useSignOut } from "../api/queries";
+import { getCurrentProjectId } from "../api/current";
+import { IndexLive } from "../api/live";
+import { useMe, useProjects, useSignOut } from "../api/queries";
 import { useTheme } from "../theme";
 import { Button } from "../ui/parts";
 import { Icon } from "../ui/Icon";
@@ -21,6 +23,9 @@ export function Shell() {
   const main = useRef<HTMLElement>(null);
   const me = useMe().data;
   const signOut = useSignOut();
+  const projects = useProjects().data;
+  const current = projects?.find((p) => p.id === getCurrentProjectId()) ?? projects?.[0];
+  const repoWord = (n: number) => `${n} ${n === 1 ? "repo" : "repos"}`;
 
   useEffect(() => {
     if (main.current) main.current.scrollTop = 0;
@@ -40,7 +45,7 @@ export function Shell() {
           spectrace
         </NavLink>
         <NavLink className="repo" to="/projects" style={{ textDecoration: "none" }}>
-          {root ? "All projects" : "Shop app · 1 repo"}
+          {root || !current ? "All projects" : `${current.name} · ${repoWord(current.repos.length)}`}
         </NavLink>
         <span className="grow" />
         <div className="usage" title="Claude plan usage, 5-hour window">
@@ -75,17 +80,17 @@ export function Shell() {
             <span>All projects</span>
           </NavLink>
           <div className="side-proj">
-            <span className="mark">S</span>
+            <span className="mark">{(current?.name.trim()[0] ?? "?").toUpperCase()}</span>
             <div className="stack-s" style={{ gap: 1, minWidth: 0 }}>
-              <b>Shop app</b>
-              <span className="mono sub" style={{ fontSize: 11 }}>xoriors/shop</span>
+              <b>{current?.name ?? "Project"}</b>
+              <span className="mono sub" style={{ fontSize: 11 }}>{current?.repos[0]?.full_name ?? ""}</span>
             </div>
           </div>
           {GROUPS.map((g) => (
             <div key={g.title} style={{ display: "contents" }}>
               <span className="sect">{g.title}</span>
               {g.items.map((it) => (
-                <NavLink key={it.id} to={`/${it.id}`} className={({ isActive }) => (isActive ? "on" : "")}>
+                <NavLink key={it.id} to={`/${it.id}`} className={({ isActive }) => (isActive || (it.id === "prs" && route === "pr") ? "on" : "")}>
                   <Icon name={it.id} />
                   <span>{it.label}</span>
                   <Badge id={it.id} />
@@ -100,6 +105,8 @@ export function Shell() {
           </div>
         </nav>
       )}
+
+      {projects?.map((p) => <IndexLive key={p.id} project={p} />)}
 
       <main ref={main} tabIndex={-1}>
         <Outlet />

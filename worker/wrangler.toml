@@ -25,3 +25,29 @@ enabled = true
 
 [vars]
 LOG_FORMAT = "json"
+
+# Job queue (T1.5): this Worker produces and consumes. A message that is still
+# failing after `max_retries` deliveries goes to the dead-letter queue, whose
+# consumer marks the job failed.
+[[queues.producers]]
+binding = "JOBS"
+queue = "spectrace-jobs"
+
+[[queues.consumers]]
+queue = "spectrace-jobs"
+max_batch_size = 10
+max_batch_timeout = 2
+max_retries = 10
+dead_letter_queue = "spectrace-jobs-dlq"
+
+[[queues.consumers]]
+queue = "spectrace-jobs-dlq"
+
+# One ProjectHub per project streams job events to browsers over WebSockets.
+[[durable_objects.bindings]]
+name = "PROJECT_HUB"
+class_name = "ProjectHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ProjectHub"]

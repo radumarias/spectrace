@@ -21,3 +21,7 @@
 .side-proj .mark{width:32px;height:32px;font-size:14px}
 .side-proj b{font:600 14.5px var(--f-display);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.fld input{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;min-height:38px;min-width:0;width:100%}
+.icon-btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;min-width:34px;min-height:34px;display:inline-grid;place-items:center;font:600 14px var(--f-mono);color:var(--muted)}
+.icon-btn:hover{color:var(--accent);border-color:var(--accent)}

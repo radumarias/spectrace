@@ -1,0 +1,9 @@
+{
+  "ref": "refs/heads/feat/coupon",
+  "before": "aaa111",
+  "after": "ccc333",
+  "deleted": false,
+  "repository": {
+    "full_name": "acme/shop"
+  }
+}

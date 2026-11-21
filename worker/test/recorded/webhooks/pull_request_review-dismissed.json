@@ -1,0 +1,41 @@
+{
+  "action": "dismissed",
+  "review": {
+    "id": 501,
+    "user": {
+      "login": "hubot"
+    },
+    "state": "dismissed",
+    "body": "Looks good",
+    "commit_id": "ccc333",
+    "submitted_at": "2026-11-19T12:30:00Z"
+  },
+  "pull_request": {
+    "id": 9007,
+    "number": 7,
+    "state": "open",
+    "draft": false,
+    "merged_at": null,
+    "title": "Add coupon field",
+    "body": "Lets shoppers enter a coupon code.",
+    "html_url": "https://github.com/acme/shop/pull/7",
+    "user": {
+      "login": "mona"
+    },
+    "head": {
+      "ref": "feat/coupon",
+      "sha": "ccc333"
+    },
+    "base": {
+      "ref": "main"
+    },
+    "created_at": "2026-11-18T09:00:00Z",
+    "updated_at": "2026-11-19T12:45:00Z",
+    "additions": 46,
+    "deletions": 2,
+    "changed_files": 2
+  },
+  "repository": {
+    "full_name": "acme/shop"
+  }
+}

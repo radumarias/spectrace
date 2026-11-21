@@ -1,0 +1,9 @@
+{
+  "ref": "refs/heads/main",
+  "before": "000aaa",
+  "after": "000bbb",
+  "deleted": false,
+  "repository": {
+    "full_name": "acme/shop"
+  }
+}

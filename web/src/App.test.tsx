@@ -17,6 +17,7 @@ function fakeServer(user: unknown) {
           ? Response.json(user)
           : Response.json({ error: { code: "unauthorized", message: "not signed in" } }, { status: 401 });
       }
+      if (new URL(req.url, "http://x").pathname === "/api/projects") return Response.json([]);
       return new Response(null, { status: 404 });
     }),
   );
@@ -38,7 +39,7 @@ it("shows the sign-in page without a session", async () => {
   at("/projects");
   const link = await screen.findByRole("link", { name: "Sign in with GitHub" });
   expect(link.getAttribute("href")).toBe("/api/auth/github/login");
-  expect(screen.queryByRole("heading", { name: "Projects" })).toBeNull();
+  expect(screen.queryByRole("heading", { name: "All your projects" })).toBeNull();
 });
 
 it("shows the signed-in user's avatar from /api/me", async () => {
@@ -51,14 +52,14 @@ it("shows the signed-in user's avatar from /api/me", async () => {
 it("shows the root page without a sidebar", async () => {
   fakeServer(USER);
   at("/projects");
-  expect(await screen.findByRole("heading", { name: "Projects" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "All your projects" })).toBeTruthy();
   expect(screen.queryByText("Quality")).toBeNull();
 });
 
 it("shows the sidebar and tab bar inside a project", async () => {
   fakeServer(USER);
-  at("/prs");
-  expect(await screen.findByRole("heading", { name: "Pull requests" })).toBeTruthy();
+  at("/map");
+  expect(await screen.findByRole("heading", { name: "App map" })).toBeTruthy();
   expect(screen.getByText("Quality")).toBeTruthy();
   expect(screen.getAllByRole("navigation", { name: "Main" })).toHaveLength(2);
 });

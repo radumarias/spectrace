@@ -12,7 +12,7 @@ export const GROUPS: { title: string; items: NavItem[] }[] = [
 /** Bottom tab bar on phones; secondary pages light up their parent tab. */
 export const TABS: { id: IconName; label: string; also?: string[] }[] = [
   { id: "home", label: "Home", also: ["project"] },
-  { id: "prs", label: "PRs" },
+  { id: "prs", label: "PRs", also: ["pr"] },
   { id: "spec", label: "Spec", also: ["map"] },
   { id: "agents", label: "Agents", also: ["risk", "runners"] },
   { id: "talk", label: "Talk" },

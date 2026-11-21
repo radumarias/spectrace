@@ -25,6 +25,7 @@ UI reference prototype: https://claude.ai/artifact/E53sDphecfigvdt7Kk82Mx
 - Rust (`crates/core`): no `unwrap` or `expect` outside tests (clippy denies them), no I/O.
 - Worker: routes are `createRoute` + `app.openapi` with zod schemas so the OpenAPI document stays true; errors are thrown as the one `AppError` (`worker/src/error.ts`) and become `{"error": {"code", "message"}}`; 5xx details are logged, never returned; log through `src/log.ts` only (eslint bans `console`); every handler has a test that calls `exports.default.fetch` in `worker/test/`. Bindings are declared in `wrangler.toml` and `src/env.ts`.
 - Web: function components, server state only through TanStack Query, no global store, colours only from the design tokens, every page works at 390 px.
+- E2E: Playwright specs live in `web/e2e/` as `*.e2e.ts` and run with `just e2e` at 1440 and 390 px against `vite dev` (SPA, Worker and local D1 together). Mock `/api` with `mockApi` from `e2e/fixtures.ts`; never call GitHub or Claude from a test.
 - GitHub and Claude are never called in tests. Tests use recorded responses and a fake `claude` binary.
 - A fixture repository (`fixtures/shop`) with the prototype's checkout flow is the test subject for specs, reviews and coverage.
 - One migration per task that changes the schema, as the next numbered file in `worker/migrations/` (D1 is SQLite: TEXT timestamps, no UUID type). Never edit a merged migration.
