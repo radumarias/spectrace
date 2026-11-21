@@ -1161,6 +1161,54 @@
           "note",
           "excerpt"
         ]
+      },
+      "SpecChangeOpened": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string",
+            "example": "https://github.com/acme/shop/pull/7"
+          },
+          "branch": {
+            "type": "string",
+            "example": "spectrace/spec-checkout-m3k2x1"
+          }
+        },
+        "required": [
+          "number",
+          "url",
+          "branch"
+        ]
+      },
+      "SpecChange": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500000,
+            "description": "The whole spec file as edited."
+          },
+          "summary": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "maxItems": 100,
+            "description": "One line per change, for the pull request.",
+            "example": [
+              "Renamed Declined to Payment declined"
+            ]
+          }
+        },
+        "required": [
+          "source",
+          "summary"
+        ]
       }
     },
     "parameters": {}
@@ -3008,6 +3056,93 @@
           },
           "404": {
             "description": "No such project or spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/specs/{specId}/changes": {
+      "post": {
+        "summary": "Save an edited spec: commit it on a new branch and open a pull request",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "specId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpecChange"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SpecChangeOpened"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nothing changed, or the edited spec has errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The spec changed on GitHub since it was indexed, or GitHub refused",
             "content": {
               "application/json": {
                 "schema": {
