@@ -2,6 +2,8 @@
 //! This crate does no I/O so it stays easy to test.
 
 pub mod anchor;
+pub mod diag;
+pub mod spec;
 
 /// Crate name, used by the server and runner to report what they are built from.
 pub const NAME: &str = "spectrace-core";
