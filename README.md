@@ -12,4 +12,4 @@ just dev     # starts the database, then server (:8080) and web app (:5173)
 curl localhost:8080/api/health
 ```
 
-Settings come from environment variables (see `.env.example`; copy it to `.env`): `DATABASE_URL` (required), `BIND_ADDR` or `PORT`, `LOG_FORMAT` (`pretty` or `json`), `RUST_LOG`. Migrations in `crates/server/migrations` run on startup.
+Settings come from environment variables (see `.env.example`; copy it to `.env`): `DATABASE_URL` (required), `BIND_ADDR` or `PORT`, `LOG_FORMAT` (`pretty` or `json`), `RUST_LOG`, and for GitHub sign-in `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `PUBLIC_URL`. Migrations in `crates/server/migrations` run on startup.

@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod routes;
@@ -6,13 +7,26 @@ use axum::Router;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tower_http::trace::TraceLayer;
 
-pub use config::Config;
+pub use config::{Config, GithubOAuth};
 pub use error::AppError;
 
 /// Shared state handed to every handler.
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    /// `None` when GitHub sign-in is not configured.
+    pub github: Option<GithubOAuth>,
+    pub http: reqwest::Client,
+}
+
+impl AppState {
+    pub fn new(db: PgPool, github: Option<GithubOAuth>) -> Self {
+        Self {
+            db,
+            github,
+            http: reqwest::Client::new(),
+        }
+    }
 }
 
 /// Connect to Postgres and apply pending migrations.
@@ -28,6 +42,7 @@ pub async fn connect(database_url: &str) -> Result<PgPool, AppError> {
 pub fn app(state: AppState) -> Router {
     Router::new()
         .merge(routes::router())
+        .merge(auth::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

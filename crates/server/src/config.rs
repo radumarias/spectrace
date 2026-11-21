@@ -9,6 +9,26 @@ pub struct Config {
     pub bind_addr: SocketAddr,
     /// `json` or `pretty`.
     pub log_format: LogFormat,
+    /// GitHub sign-in. `None` until `GITHUB_CLIENT_ID` and
+    /// `GITHUB_CLIENT_SECRET` are both set; sign-in routes then answer 500.
+    pub github: Option<GithubOAuth>,
+}
+
+/// GitHub OAuth app settings. The two `*_url` fields exist so tests can point
+/// at a mock GitHub.
+#[derive(Debug, Clone)]
+pub struct GithubOAuth {
+    pub client_id: String,
+    pub client_secret: String,
+    /// Where users reach the app (the web dev server proxies `/api`); the
+    /// OAuth callback is `<public_url>/api/auth/github/callback`.
+    pub public_url: String,
+    /// `https://github.com` unless overridden by `GITHUB_OAUTH_URL`.
+    pub oauth_url: String,
+    /// `https://api.github.com` unless overridden by `GITHUB_API_URL`.
+    pub api_url: String,
+    /// Set the `Secure` cookie flag (on when `public_url` is https).
+    pub secure_cookies: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,10 +64,39 @@ impl Config {
                 )))
             }
         };
+        let non_empty = |k: &str| get(k).filter(|v| !v.trim().is_empty());
+        let github = match (
+            non_empty("GITHUB_CLIENT_ID"),
+            non_empty("GITHUB_CLIENT_SECRET"),
+        ) {
+            (Some(client_id), Some(client_secret)) => {
+                let public_url = get("PUBLIC_URL")
+                    .unwrap_or_else(|| "http://localhost:5173".into())
+                    .trim_end_matches('/')
+                    .to_string();
+                Some(GithubOAuth {
+                    secure_cookies: public_url.starts_with("https://"),
+                    client_id,
+                    client_secret,
+                    public_url,
+                    oauth_url: get("GITHUB_OAUTH_URL")
+                        .unwrap_or_else(|| "https://github.com".into()),
+                    api_url: get("GITHUB_API_URL")
+                        .unwrap_or_else(|| "https://api.github.com".into()),
+                })
+            }
+            (None, None) => None,
+            _ => {
+                return Err(AppError::Config(
+                    "set both GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET, or neither".into(),
+                ))
+            }
+        };
         Ok(Self {
             database_url,
             bind_addr,
             log_format,
+            github,
         })
     }
 }
@@ -88,6 +137,24 @@ mod tests {
         .unwrap();
         assert_eq!(c.bind_addr.port(), 9000);
         assert_eq!(c.log_format, LogFormat::Json);
+    }
+
+    #[test]
+    fn github_is_optional_but_all_or_nothing() {
+        let c = cfg(&[("DATABASE_URL", "x")]).unwrap();
+        assert!(c.github.is_none());
+        assert!(cfg(&[("DATABASE_URL", "x"), ("GITHUB_CLIENT_ID", "id")]).is_err());
+        let c = cfg(&[
+            ("DATABASE_URL", "x"),
+            ("GITHUB_CLIENT_ID", "id"),
+            ("GITHUB_CLIENT_SECRET", "s"),
+            ("PUBLIC_URL", "https://app.example/"),
+        ])
+        .unwrap();
+        let g = c.github.unwrap();
+        assert_eq!(g.public_url, "https://app.example");
+        assert!(g.secure_cookies);
+        assert_eq!(g.api_url, "https://api.github.com");
     }
 
     #[test]
