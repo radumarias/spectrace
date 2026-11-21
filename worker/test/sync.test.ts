@@ -19,6 +19,8 @@ let requests: string[];
 let closed: Record<number, { merged_at: string | null }>;
 /** What `GET /pulls?state=closed` lists: recently closed pull requests, merged ones with `merged_at`. */
 let closedList: unknown[] = [];
+/** The account the App is installed on for acme/shop, as `GET /repos/acme/shop/installation` answers; null = not installed. */
+let installedOn: { id: number; account: { id: number; login: string; type: string } } | null = null;
 
 function mockGithub() {
   requests = [];
@@ -32,6 +34,7 @@ function mockGithub() {
     if (/^\/app\/installations\/\d+\/access_tokens$/.test(path)) {
       return Response.json({ token: "ghs_test", expires_at: new Date(Date.now() + 3_600_000).toISOString() }, { status: 201 });
     }
+    if (path === "/repos/acme/shop/installation") return installedOn ? Response.json(installedOn) : Response.json({}, { status: 404 });
     if (req.headers.get("authorization") !== "Bearer ghs_test") return Response.json({}, { status: 401 });
     const page = Number(url.searchParams.get("page") ?? "1");
     const slice = (all: unknown[]) => all.slice((page - 1) * 100, page * 100);
@@ -89,12 +92,27 @@ beforeEach(() => {
   pulls = structuredClone(pullsOpen);
   closed = {};
   closedList = [];
+  installedOn = null;
   files = { 7: structuredClone(files7), 9: structuredClone(files9) };
   mockGithub();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("sync job", () => {
+  it("picks up an installation made outside spectrace when it is on the owner's own account", async () => {
+    const { projectId, userId } = await setup({ installation: false });
+    const login = (await env.DB.prepare("SELECT login FROM users WHERE id = ?1").bind(userId).first<{ login: string }>())!.login;
+    installedOn = { id: 777, account: { id: 1, login, type: "User" } };
+    expect(await runSync(projectId)).toEqual({ state: "succeeded", error: null });
+    expect((await env.DB.prepare("SELECT installation_id FROM user_installations WHERE user_id = ?1").bind(userId).all()).results).toEqual([{ installation_id: 777 }]);
+  });
+
+  it("does not link an installation that belongs to someone else", async () => {
+    const { projectId } = await setup({ installation: false });
+    installedOn = { id: 778, account: { id: 2, login: "someone-else", type: "User" } };
+    expect((await runSync(projectId))?.state).toBe("failed");
+  });
+
   it("stores recently merged and closed pull requests that were never seen open", async () => {
     const { projectId, repoId } = await setup();
     const base = pullsOpen[0]!;

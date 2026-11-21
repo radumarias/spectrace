@@ -8,7 +8,7 @@
 // longer open on GitHub are marked closed (with `merged_at` when merged).
 import type { Bindings } from "../env";
 import { AppError } from "../error";
-import { appConfigFromEnv, ghHeaders, installationToken, type AppConfig } from "../github-app";
+import { appConfigFromEnv, ghHeaders, installationToken, linkRepoInstallation, type AppConfig } from "../github-app";
 import { pullStatements, type GhFile, type GhPull } from "../pulls";
 import { PermanentError, registerHandler, type JobHandler } from "./queue";
 
@@ -72,7 +72,11 @@ async function mergedAtOf(app: AppConfig, token: string, fullName: string, numbe
 }
 
 async function syncRepo(env: Bindings, app: AppConfig, projectId: string, repo: RepoRow, progress: (n: number) => Promise<void>): Promise<number> {
-  const installationId = await installationFor(env, projectId, repo.full_name);
+  let installationId = await installationFor(env, projectId, repo.full_name);
+  if (installationId === null) {
+    const owner = await env.DB.prepare("SELECT owner_id FROM projects WHERE id = ?1").bind(projectId).first<{ owner_id: string }>();
+    if (owner) installationId = await linkRepoInstallation(app, env.DB, owner.owner_id, repo.full_name);
+  }
   if (installationId === null) throw new PermanentError(`no GitHub App installation for ${repo.full_name}; install the app on its owner first`);
   const token = await installationToken(app, installationId);
   if (token === null) throw new PermanentError(`GitHub no longer knows installation ${installationId}`);

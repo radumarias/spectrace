@@ -3,7 +3,7 @@
 // `project_repos.id`. Re-running it is safe: it only overwrites the same row.
 import type { Bindings } from "../env";
 import { AppError } from "../error";
-import { appConfigFromEnv, appJwt, ghHeaders, installationToken, type AppConfig } from "../github-app";
+import { appConfigFromEnv, appJwt, ghHeaders, installationToken, linkRepoInstallation, type AppConfig } from "../github-app";
 import { log } from "../log";
 import { enqueueJob, PermanentError, type JobContext, type JobRow } from "./queue";
 import { SYNC_KIND } from "./sync";
@@ -79,8 +79,10 @@ async function installationFor(env: Bindings, app: AppConfig, repo: RepoRow): Pr
   if (!res.ok) throw failure("installation lookup", res);
   const { id } = (await res.json()) as { id: number };
   const allowed = await env.DB.prepare("SELECT 1 AS ok FROM user_installations WHERE user_id = ?1 AND installation_id = ?2").bind(repo.owner_id, id).first();
-  if (!allowed) throw notInstalled;
-  return id;
+  if (allowed) return id;
+  // Installed on GitHub but never linked to this person (for example, installed outside spectrace's install page).
+  if ((await linkRepoInstallation(app, env.DB, repo.owner_id, repo.full_name)) === id) return id;
+  throw notInstalled;
 }
 
 async function readRepo(job: JobRow, ctx: JobContext, repo: RepoRow): Promise<void> {
