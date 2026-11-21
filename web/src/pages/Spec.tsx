@@ -7,7 +7,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNo
 import { createPortal } from "react-dom";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
-import { useSpec, useSpecs, type SpecAnchor, type SpecDetail, type SpecSummary } from "../api/specs";
+import { useSaveSpec, useSpec, useSpecs, type SpecAnchor, type SpecDetail, type SpecSummary } from "../api/specs";
 import { Button, Card, Pill, Tabs } from "../ui/parts";
 import { Diagram } from "../spec/Diagram";
 import { SpecMarkdown } from "../spec/SpecMarkdown";
@@ -285,6 +285,7 @@ export function SpecPage() {
   const query = useSpec(project?.id, specId);
   const [fs, setFs] = useState(false);
   const closeFs = useCallback(() => setFs(false), []);
+  const saveSpec = useSaveSpec(project?.id ?? "", specId ?? "");
   const spec = query.data;
   const steps = useMemo(() => (spec ? stepsOf(spec) : []), [spec]);
   const status = useMemo(() => Object.fromEntries(steps.map((s) => [s.node, s.status])), [steps]);
@@ -413,7 +414,7 @@ export function SpecPage() {
           </div>
         </div>
         <Suspense fallback={<p className="sub">Loading the editor…</p>}>
-          <SpecEditor key={spec.source} spec={spec} projectId={project.id} onClose={() => set("edit", null)} />
+          <SpecEditor key={spec.source} spec={{ path: spec.path, title: spec.title, flow: spec.flow, source: spec.source, status }} onSave={(body) => saveSpec.mutateAsync(body)} onClose={() => set("edit", null)} />
         </Suspense>
       </div>
     );
