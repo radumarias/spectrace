@@ -895,6 +895,41 @@
               ]
             }
           },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "node": {
+                  "type": "string"
+                },
+                "href": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "tooltip": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "line": {
+                  "type": "integer"
+                },
+                "span": {
+                  "$ref": "#/components/schemas/SpecSpan"
+                }
+              },
+              "required": [
+                "node",
+                "href",
+                "name",
+                "tooltip",
+                "line",
+                "span"
+              ]
+            }
+          },
           "comments": {
             "type": "array",
             "items": {
@@ -927,6 +962,7 @@
           "nodes",
           "edges",
           "clicks",
+          "actions",
           "comments"
         ]
       },

@@ -56,6 +56,8 @@ pub enum Code {
     S013,
     /// Two identical edges (same source, label and target).
     S014,
+    /// A node has more than one `click` line.
+    S015,
     /// A step has no requirement lines.
     W001,
     /// A node has no edges at all.
@@ -88,6 +90,7 @@ impl Code {
             Code::S012 => "S012",
             Code::S013 => "S013",
             Code::S014 => "S014",
+            Code::S015 => "S015",
             Code::W001 => "W001",
             Code::W002 => "W002",
             Code::W003 => "W003",
