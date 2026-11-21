@@ -1,5 +1,5 @@
 import type { Bindings } from "../env";
-import { toEvent, type EventRow, type JobEvent } from "../hub";
+import { toEvent, type EventRow, type JobEvent } from "../events";
 import { log } from "../log";
 
 export const JOBS_QUEUE = "spectrace-jobs";
