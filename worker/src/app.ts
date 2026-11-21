@@ -3,6 +3,7 @@ import type { AppEnv } from "./env";
 import { AppError, errorResponse } from "./error";
 import { log } from "./log";
 import { registerHealth } from "./routes/health";
+import { registerJobs } from "./routes/jobs";
 
 export function createApp() {
   const app = new OpenAPIHono<AppEnv>({
@@ -27,6 +28,7 @@ export function createApp() {
   });
 
   registerHealth(app);
+  registerJobs(app);
 
   app.doc("/api/openapi.json", { openapi: "3.1.0", info: { title: "spectrace API", version: "0.1.0" } });
 
