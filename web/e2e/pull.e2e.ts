@@ -75,7 +75,7 @@ test("an open pull request page follows a webhook without a reload", async ({ pa
   newest!.send(JSON.stringify({ id: ++seq, projectId: "p1", jobId: "wh-1", event: "pr.updated", data: { repo: "acme/shop", number: 58, cause: "check_run.completed" }, createdAt: "2026-11-21T12:00:00Z" }));
 
   await expect(page.getByRole("heading", { name: "Checkout: show the decline reason" })).toBeVisible();
-  await expect(page.getByText("checks passing")).toBeVisible();
+  await expect(page.getByText("tests 1/1")).toBeVisible();
   await expectNoHorizontalScroll(page);
   expect(errors).toEqual([]);
 });
