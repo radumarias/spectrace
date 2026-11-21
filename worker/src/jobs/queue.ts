@@ -1,4 +1,5 @@
 import type { Bindings } from "../env";
+import { AppError } from "../error";
 import { toEvent, type EventRow, type JobEvent } from "../hub";
 import { log } from "../log";
 
@@ -67,6 +68,28 @@ export async function emit(env: Bindings, job: Pick<JobRow, "id" | "project_id">
     log("warn", "hub publish failed", { jobId: job.id, error: String(error) }, env.LOG_FORMAT);
   }
   return ev;
+}
+
+/**
+ * Insert a job and put it on the queue. If the queue is unavailable the job is
+ * marked failed ("could not be queued") and a 502 is thrown.
+ */
+export async function enqueueJob(env: Bindings, projectId: string, kind: string, target: string, maxAttempts: number): Promise<JobRow> {
+  const id = crypto.randomUUID();
+  const row = await env.DB.prepare("INSERT INTO jobs (id, project_id, kind, target, max_attempts) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING *")
+    .bind(id, projectId, kind, target, maxAttempts)
+    .first<JobRow>();
+  if (!row) throw new AppError("internal", "job insert returned no row");
+  await emit(env, row, "queued", { kind: row.kind, target: row.target });
+  try {
+    await env.JOBS.send({ jobId: id });
+  } catch (cause) {
+    log("error", "queue send failed", { jobId: id, error: String(cause) }, env.LOG_FORMAT);
+    await env.DB.prepare("UPDATE jobs SET state = 'failed', error = 'could not be queued', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1").bind(id).run();
+    await emit(env, row, "failed", { error: "could not be queued" });
+    throw new AppError("upstream", "queue send failed", { cause });
+  }
+  return row;
 }
 
 /** Delay before the next try: 5 s, doubling, capped at 5 minutes. */

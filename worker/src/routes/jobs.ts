@@ -3,14 +3,13 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { AppEnv } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
-import { log } from "../log";
-import { emit, type JobRow } from "../jobs/queue";
+import { enqueueJob, type JobRow } from "../jobs/queue";
 import { requireProjectOwner } from "./projects";
 
 const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
 const JobParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "jobId", in: "path" } });
 
-const Job = z
+export const Job = z
   .object({
     id: z.string(),
     projectId: z.string(),
@@ -26,7 +25,7 @@ const Job = z
   })
   .openapi("Job");
 
-function toJob(r: JobRow): z.infer<typeof Job> {
+export function toJob(r: JobRow): z.infer<typeof Job> {
   return {
     id: r.id,
     projectId: r.project_id,
@@ -111,20 +110,7 @@ export function registerJobs(app: OpenAPIHono<AppEnv>) {
     const { projectId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
     const body = c.req.valid("json");
-    const id = crypto.randomUUID();
-    const row = await c.env.DB.prepare("INSERT INTO jobs (id, project_id, kind, target, max_attempts) VALUES (?1, ?2, ?3, ?4, ?5) RETURNING *")
-      .bind(id, projectId, body.kind, body.target, body.maxAttempts)
-      .first<JobRow>();
-    if (!row) throw new AppError("internal", "job insert returned no row");
-    await emit(c.env, row, "queued", { kind: row.kind, target: row.target });
-    try {
-      await c.env.JOBS.send({ jobId: id });
-    } catch (cause) {
-      log("error", "queue send failed", { jobId: id, error: String(cause) }, c.env.LOG_FORMAT);
-      await c.env.DB.prepare("UPDATE jobs SET state = 'failed', error = 'could not be queued', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1").bind(id).run();
-      await emit(c.env, row, "failed", { error: "could not be queued" });
-      throw new AppError("upstream", "queue send failed", { cause });
-    }
+    const row = await enqueueJob(c.env, projectId, body.kind, body.target, body.maxAttempts);
     return c.json(toJob(row), 202);
   });
 

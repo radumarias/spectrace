@@ -15,6 +15,8 @@ type Pull = (typeof pullsOpen)[number];
 let pulls: Pull[];
 let files: Record<number, unknown[]>;
 let requests: string[];
+/** Pull requests no longer open on GitHub, by number (what `GET /pulls/{n}` answers). */
+let closed: Record<number, { merged_at: string | null }>;
 
 function mockGithub() {
   requests = [];
@@ -34,6 +36,8 @@ function mockGithub() {
     if (path === "/repos/acme/shop/pulls") return Response.json(slice(pulls));
     const f = /^\/repos\/acme\/shop\/pulls\/(\d+)\/files$/.exec(path);
     if (f) return Response.json(slice(files[Number(f[1])] ?? []));
+    const d = /^\/repos\/acme\/shop\/pulls\/(\d+)$/.exec(path);
+    if (d && closed[Number(d[1])]) return Response.json({ number: Number(d[1]), state: "closed", ...closed[Number(d[1])] });
     return Response.json({ message: "Not Found" }, { status: 404 });
   });
 }
@@ -81,6 +85,7 @@ const filesOf = async (repoId: string, number: number) =>
 beforeEach(() => {
   forgetInstallationTokens();
   pulls = structuredClone(pullsOpen);
+  closed = {};
   files = { 7: structuredClone(files7), 9: structuredClone(files9) };
   mockGithub();
 });
@@ -108,6 +113,7 @@ describe("sync job", () => {
     const idsBefore = (await env.DB.prepare("SELECT id FROM pull_requests WHERE repo_id = ?1 ORDER BY number").bind(repoId).all()).results;
 
     // PR 7 gets a new commit and a new title; PR 9 is merged (gone from the open list).
+    closed = { 9: { merged_at: "2026-11-21T09:00:00Z" } };
     pulls = [{ ...pulls[0]!, title: "Add coupon field", head: { ref: "feat/coupon", sha: "ccc333" } }];
     files[7] = [{ filename: "src/checkout/coupon.ts", status: "added", additions: 50, deletions: 0 }];
     requests.length = 0;
@@ -117,6 +123,10 @@ describe("sync job", () => {
       [7, "Add coupon field", "open", "ccc333", 50, 1],
       [9, "Rename cart totals", "closed", "bbb222", 3, 1],
     ]);
+    expect((await env.DB.prepare("SELECT number, merged_at FROM pull_requests WHERE repo_id = ?1 ORDER BY number").bind(repoId).all()).results).toEqual([
+      { number: 7, merged_at: null },
+      { number: 9, merged_at: "2026-11-21T09:00:00Z" },
+    ]);
     expect(await filesOf(repoId, 7)).toHaveLength(1);
     expect(await filesOf(repoId, 9)).toHaveLength(1); // kept for history
     expect((await env.DB.prepare("SELECT id FROM pull_requests WHERE repo_id = ?1 ORDER BY number").bind(repoId).all()).results).toEqual(idsBefore);
@@ -125,6 +135,15 @@ describe("sync job", () => {
     requests.length = 0;
     await runSync(projectId);
     expect(requests.filter((r) => r.includes("/files"))).toEqual([]);
+  });
+
+  it("records a PR closed without merging as closed, with no merge time", async () => {
+    const { projectId, repoId } = await setup();
+    await runSync(projectId);
+    pulls = [pulls[0]!];
+    closed = { 9: { merged_at: null } };
+    await runSync(projectId);
+    expect((await env.DB.prepare("SELECT state, merged_at FROM pull_requests WHERE repo_id = ?1 AND number = 9").bind(repoId).first())).toEqual({ state: "closed", merged_at: null });
   });
 
   it("reads every page of a PR's files", async () => {
