@@ -58,6 +58,32 @@
           "avatar_url"
         ]
       },
+      "ClaudeSetup": {
+        "type": "object",
+        "properties": {
+          "using": {
+            "type": "string",
+            "enum": [
+              "subscription",
+              "own_key",
+              "server_key",
+              "none"
+            ]
+          },
+          "keyHint": {
+            "type": "string",
+            "nullable": true
+          },
+          "canSave": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "using",
+          "keyHint",
+          "canSave"
+        ]
+      },
       "GithubRepo": {
         "type": "object",
         "properties": {
@@ -1400,7 +1426,7 @@
     "/api/ai/health": {
       "get": {
         "summary": "Send one tiny message to Claude, the way this user's agent work goes (signed-in users)",
-        "description": "For the owner in CLAUDE_CODE_OWNER, once Claude Code is set up, the message runs through Claude Code on the owner's subscription (`backend: claude-code`). Everyone else goes through the Messages API and AI Gateway with the API key (`backend: api`).",
+        "description": "For the owner in CLAUDE_CODE_OWNER, once Claude Code is set up, the message runs through Claude Code on the owner's subscription (`backend: claude-code`). Everyone else goes through the Messages API and AI Gateway, with their own saved key (`backend: user_key`) or the server's (`backend: api`).",
         "responses": {
           "200": {
             "description": "Claude answered",
@@ -1419,6 +1445,7 @@
                       "type": "string",
                       "enum": [
                         "claude-code",
+                        "user_key",
                         "api"
                       ]
                     },
@@ -1616,6 +1643,123 @@
         "responses": {
           "204": {
             "description": "Session ended (also when there was none)"
+          }
+        }
+      }
+    },
+    "/api/me/claude": {
+      "get": {
+        "summary": "How the signed-in user's agent work reaches Claude",
+        "responses": {
+          "200": {
+            "description": "Current setup",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaudeSetup"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Save the signed-in user's own Anthropic API key (stored encrypted, never returned)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "apiKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 400
+                  }
+                },
+                "required": [
+                  "apiKey"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaudeSetup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not an Anthropic API key, or a subscription token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "This server cannot save keys (SECRETS_KEY)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove the signed-in user's saved API key",
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaudeSetup"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

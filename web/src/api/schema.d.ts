@@ -64,7 +64,7 @@ export interface paths {
         };
         /**
          * Send one tiny message to Claude, the way this user's agent work goes (signed-in users)
-         * @description For the owner in CLAUDE_CODE_OWNER, once Claude Code is set up, the message runs through Claude Code on the owner's subscription (`backend: claude-code`). Everyone else goes through the Messages API and AI Gateway with the API key (`backend: api`).
+         * @description For the owner in CLAUDE_CODE_OWNER, once Claude Code is set up, the message runs through Claude Code on the owner's subscription (`backend: claude-code`). Everyone else goes through the Messages API and AI Gateway, with their own saved key (`backend: user_key`) or the server's (`backend: api`).
          */
         get: {
             parameters: {
@@ -85,7 +85,7 @@ export interface paths {
                             /** @enum {string} */
                             status: "ok";
                             /** @enum {string} */
-                            backend: "claude-code" | "api";
+                            backend: "claude-code" | "user_key" | "api";
                             model: string;
                             gateway?: string;
                             reply: string;
@@ -322,6 +322,133 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/claude": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How the signed-in user's agent work reaches Claude */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current setup */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ClaudeSetup"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /** Save the signed-in user's own Anthropic API key (stored encrypted, never returned) */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        apiKey: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ClaudeSetup"];
+                    };
+                };
+                /** @description Not an Anthropic API key, or a subscription token */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description This server cannot save keys (SECRETS_KEY) */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Remove the signed-in user's saved API key */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Removed */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ClaudeSetup"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -2337,6 +2464,12 @@ export interface components {
             login: string;
             name: string | null;
             avatar_url: string | null;
+        };
+        ClaudeSetup: {
+            /** @enum {string} */
+            using: "subscription" | "own_key" | "server_key" | "none";
+            keyHint: string | null;
+            canSave: boolean;
         };
         GithubRepo: {
             id: number;

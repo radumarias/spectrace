@@ -11,7 +11,7 @@ const route = createRoute({
   path: "/api/ai/health",
   summary: "Send one tiny message to Claude, the way this user's agent work goes (signed-in users)",
   description:
-    "For the owner in CLAUDE_CODE_OWNER, once Claude Code is set up, the message runs through Claude Code on the owner's subscription (`backend: claude-code`). Everyone else goes through the Messages API and AI Gateway with the API key (`backend: api`).",
+    "For the owner in CLAUDE_CODE_OWNER, once Claude Code is set up, the message runs through Claude Code on the owner's subscription (`backend: claude-code`). Everyone else goes through the Messages API and AI Gateway, with their own saved key (`backend: user_key`) or the server's (`backend: api`).",
   responses: {
     200: {
       description: "Claude answered",
@@ -19,9 +19,9 @@ const route = createRoute({
         "application/json": {
           schema: z.object({
             status: z.literal("ok"),
-            backend: z.enum(["claude-code", "api"]),
+            backend: z.enum(["claude-code", "user_key", "api"]),
             model: z.string(),
-            /** The AI Gateway name; only for `backend: api`. */
+            /** The AI Gateway name; not for `backend: claude-code`. */
             gateway: z.string().optional(),
             reply: z.string(),
             ms: z.number().int(),
@@ -39,13 +39,13 @@ export function registerAi(app: OpenAPIHono<AppEnv>) {
   app.openapi(route, async (c) => {
     const user = await requireUser(c);
     const start = Date.now();
-    const out = await ask(c.env, user.login, { model: MODELS.haiku, maxTokens: 16, prompt: "Reply with the single word OK." });
+    const out = await ask(c.env, user, { model: MODELS.haiku, maxTokens: 16, prompt: "Reply with the single word OK." });
     return c.json(
       {
         status: "ok" as const,
         backend: out.backend,
         model: out.model,
-        ...(out.backend === "api" ? { gateway: gatewayName(c.env) } : {}),
+        ...(out.backend !== "claude-code" ? { gateway: gatewayName(c.env) } : {}),
         reply: out.text,
         ms: Date.now() - start,
       },
