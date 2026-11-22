@@ -1542,6 +1542,31 @@
             },
             "description": "Indexes of `actions` the user already ran."
           },
+          "board": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "boardId": {
+                "type": "string"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "What the coordinator changed on the board, in words, such as `Added a flowchart`."
+              },
+              "undone": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "boardId",
+              "changes",
+              "undone"
+            ],
+            "description": "The coordinator's changes to the whiteboard the user was on, already applied; null when it changed nothing."
+          },
           "createdAt": {
             "type": "string"
           }
@@ -1553,6 +1578,7 @@
           "tools",
           "actions",
           "ran",
+          "board",
           "createdAt"
         ]
       },
@@ -1586,6 +1612,58 @@
           "label"
         ],
         "description": "Something the coordinator proposes. Nothing runs until the user clicks it."
+      },
+      "CoordinatorBoard": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "note",
+                    "mermaid"
+                  ]
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "text"
+              ]
+            }
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "blocks",
+          "createdAt",
+          "updatedAt"
+        ],
+        "description": "The whiteboard after the coordinator's change (or its undo)."
       },
       "CoordinatorScreen": {
         "type": "object",
@@ -4374,7 +4452,7 @@
         },
         "responses": {
           "200": {
-            "description": "Your message and the coordinator's reply",
+            "description": "Your message and the coordinator's reply; `board` is the whiteboard after the coordinator changed it, when it did",
             "content": {
               "application/json": {
                 "schema": {
@@ -4385,10 +4463,14 @@
                       "items": {
                         "$ref": "#/components/schemas/CoordinatorMessage"
                       }
+                    },
+                    "board": {
+                      "$ref": "#/components/schemas/CoordinatorBoard"
                     }
                   },
                   "required": [
-                    "messages"
+                    "messages",
+                    "board"
                   ]
                 }
               }
@@ -4597,6 +4679,89 @@
           },
           "409": {
             "description": "Already ran",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/coordinator/{messageId}/undo": {
+      "post": {
+        "summary": "Undo the coordinator's change to the whiteboard",
+        "description": "Puts the board back as it was before this reply changed it. Only while nobody changed the board since; otherwise 409.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "messageId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The message, now undone, and the board as it was",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CoordinatorMessage"
+                      }
+                    },
+                    "board": {
+                      "$ref": "#/components/schemas/CoordinatorBoard"
+                    }
+                  },
+                  "required": [
+                    "messages",
+                    "board"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already undone, or the board changed since",
             "content": {
               "application/json": {
                 "schema": {
