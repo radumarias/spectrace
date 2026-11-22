@@ -58,7 +58,7 @@ Until `DEVPAGE_BUCKET_URL` is set, devpage is off: nothing is published and the 
 
 Agents and reviews call Claude through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) (`worker/src/ai.ts`). Models: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`.
 
-**Use a standard Anthropic API key (console.anthropic.com), billed per token.** A Claude Pro/Max subscription token (`claude setup-token`) is not supported: Anthropic's terms only allow it inside Claude Code and Claude.ai, not in a server-side app or the Messages API.
+This path needs a standard Anthropic API key (console.anthropic.com), billed per token. A subscription token cannot be used here: the Messages API takes only API keys. To run on your Claude subscription instead, see [Claude Code on your subscription](#claude-code-on-your-subscription) below; this path stays the fallback.
 
 ```sh
 cd worker
@@ -70,9 +70,35 @@ npx wrangler secret put CF_AIG_TOKEN             # only if the gateway has Authe
 
 If you store the Anthropic key in the gateway itself (BYOK), skip `ANTHROPIC_API_KEY` and set only `CF_AIG_TOKEN`. Check it signed in with `GET /api/ai/health`: it sends one 16-token Haiku message and answers 503 until configured.
 
+## Claude Code on your subscription
+
+Agent work can run on the owner's own Claude subscription (Pro, Max, Ultra, Team or Enterprise) instead of API tokens. The Worker hands each task to the **Claude Code CLI itself**, run headless (`claude -p`) in a Cloudflare Container beside it (`ClaudeCodeRunner`, image `containers/claude-code/Dockerfile`, code in `worker/src/claude-code.ts`). The image installs `@anthropic-ai/claude-code` at a pinned version exactly as published; spectrace never patches it.
+
+Why this is allowed, and its limits ([Anthropic's legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance), checked 2026-11-22):
+
+- Signing in to the unmodified Claude Code binary with your own subscription is allowed, including where it is hosted for you; `claude setup-token` exists for exactly this kind of headless use.
+- Routing other people's requests through your plan is not. So only the GitHub login in `CLAUDE_CODE_OWNER` gets the subscription; every other user's work goes through the API key path above (or fails with 503 if there is none). Do not share the token or set it on a deployment other people use as their own.
+- Plan usage limits assume ordinary individual use. Heavy agent runs count against your limits like any Claude Code session.
+
+One-time setup:
+
+1. On your own machine, signed in to the subscription you want to use: `claude setup-token`. Approve in the browser; it prints a token that is valid for one year. Copy it straight into the next command and never paste it in chat or commit it.
+2. Set the secret and your login:
+
+   ```sh
+   cd worker
+   npx wrangler secret put CLAUDE_CODE_OAUTH_TOKEN   # the token from step 1
+   npx wrangler secret put CLAUDE_CODE_OWNER         # your GitHub login, e.g. radumarias
+   ```
+
+3. `just deploy` (needs Docker, like devpage: wrangler builds and pushes the image; Containers need the Workers Paid plan).
+4. Signed in as that login, open `GET /api/ai/health`. It answers `"backend": "claude-code"` when the message went through Claude Code on the subscription, `"backend": "api"` when it fell back to the API key.
+
+Until `CLAUDE_CODE_OAUTH_TOKEN` is set, the container is never started and everything uses the API key. Renew the token before it expires (a year after step 1): rerun step 1 and `wrangler secret put` again. To try it locally, build and run the image (`docker build -t spectrace-claude-code containers/claude-code && docker run -p 8080:8080 -e CLAUDE_CODE_OAUTH_TOKEN spectrace-claude-code`) and put `CLAUDE_CODE_ORIGIN=http://127.0.0.1:8080` and `CLAUDE_CODE_OWNER=<your login>` in `worker/.dev.vars`.
+
 ## Cost
 
-Workers, D1 and static assets are all within the free plan for this app at its current size. The devpage container needs the Workers Paid plan; it sleeps after 30 minutes without requests, and R2 storage for spec versions is small.
+Workers, D1 and static assets are all within the free plan for this app at its current size. The devpage and Claude Code containers need the Workers Paid plan; they sleep after 30 and 10 minutes without requests, and R2 storage for spec versions is small.
 
 ## Not yet deployed
 

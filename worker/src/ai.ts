@@ -44,7 +44,7 @@ export function gatewayName(env: AiEnv): string {
  * Auth is a standard Anthropic API key (`ANTHROPIC_API_KEY`, sent as `x-api-key`). If the gateway
  * itself requires authentication, `CF_AIG_TOKEN` is sent as `cf-aig-authorization`; with a key
  * stored in the gateway (BYOK) that token alone is enough. Neither value is ever logged.
- * Claude Pro/Max subscription tokens are deliberately not supported: Anthropic does not allow them in third-party services.
+ * Subscription tokens do not work here (the Messages API takes API keys); the owner's subscription is used through Claude Code instead (src/claude-code.ts).
  */
 export async function createMessage(env: AiEnv, req: MessageRequest): Promise<MessageResponse> {
   const key = env.ANTHROPIC_API_KEY?.trim();
