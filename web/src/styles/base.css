@@ -150,3 +150,10 @@ figcaption{font:400 10px var(--f-mono);color:var(--muted)}
 .dl-note{color:var(--muted)}
 .clamp{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .box{background:var(--sunk);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:13px}
+
+/* agent review (PR detail) */
+.review-card{border-left:4px solid var(--accent)}
+.review-run{border-color:var(--accent)}
+.finding.f-high{border-left:4px solid var(--bad)}
+.finding.f-medium{border-left:4px solid var(--warn)}
+.finding.f-low{border-left:4px solid var(--idle)}

@@ -135,3 +135,42 @@ export function useMergePull(projectId: string, pullId: string) {
     onSuccess: () => refreshPulls(qc),
   });
 }
+
+export type AgentReview = components["schemas"]["AgentReview"];
+export type Finding = components["schemas"]["Finding"];
+
+export const agentReviewKey = (projectId: string | undefined, pullId: string | undefined) => ["agent-review", projectId, pullId] as const;
+
+const isRunning = (r: AgentReview | null | undefined) => r?.state === "queued" || r?.state === "running";
+
+/**
+ * The latest agent review of a pull request. Live events refresh it; while one
+ * runs it is also read again every few seconds, in case the socket is down.
+ */
+export function useAgentReview(projectId: string | undefined, pullId: string | undefined) {
+  return useQuery({
+    queryKey: agentReviewKey(projectId, pullId),
+    enabled: Boolean(projectId && pullId),
+    queryFn: async (): Promise<AgentReview | null> => {
+      const { data, response } = await api.GET("/api/projects/{projectId}/pulls/{pullId}/agent-review", {
+        params: { path: { projectId: projectId!, pullId: pullId! } },
+      });
+      if (!data) throw new Error(`Could not load the agent review (${response.status}).`);
+      return data.review;
+    },
+    refetchInterval: (q) => (isRunning(q.state.data) ? 5000 : false),
+  });
+}
+
+/** "Run agent review": queue a review of the head commit. */
+export function useRunAgentReview(projectId: string, pullId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<AgentReview> => {
+      const { data, error } = await api.POST("/api/projects/{projectId}/pulls/{pullId}/agent-review", { params: { path: { projectId, pullId } } });
+      if (!data) throw apiError(error, "Could not start the agent review.");
+      return data.review;
+    },
+    onSuccess: (review) => qc.setQueryData(agentReviewKey(projectId, pullId), review),
+  });
+}
