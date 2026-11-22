@@ -8,6 +8,7 @@ import { registerAi } from "./routes/ai";
 import { registerAuth } from "./routes/auth";
 import { registerBoards } from "./routes/boards";
 import { registerClaude } from "./routes/claude";
+import { registerCoordinator } from "./routes/coordinator";
 import { registerGithub } from "./routes/github";
 import { registerHealth } from "./routes/health";
 import { registerJobs } from "./routes/jobs";
@@ -52,6 +53,7 @@ export function createApp() {
   registerSpecs(app);
   registerBoards(app);
   registerDevpage(app);
+  registerCoordinator(app);
 
   app.doc("/api/openapi.json", { openapi: "3.1.0", info: { title: "spectrace API", version: "0.1.0" } });
 
