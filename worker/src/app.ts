@@ -3,6 +3,7 @@ import { registerDevpage } from "./devpage";
 import type { AppEnv } from "./env";
 import { AppError, errorResponse } from "./error";
 import { log } from "./log";
+import { registerAgentReview } from "./routes/agent-review";
 import { registerAi } from "./routes/ai";
 import { registerAuth } from "./routes/auth";
 import { registerBoards } from "./routes/boards";
@@ -47,6 +48,7 @@ export function createApp() {
   registerJobs(app);
   registerPulls(app);
   registerPullActions(app);
+  registerAgentReview(app);
   registerSpecs(app);
   registerBoards(app);
   registerDevpage(app);
