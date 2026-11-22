@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
-import { useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, type PullDetail as Pull } from "../api/pulls";
+import { useAgentReview, useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, useRunAgentReview, type AgentReview, type Finding, type PullDetail as Pull } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
 import { Diff } from "../ui/Diff";
 import { Markdown, stripHtmlComments } from "../ui/Markdown";
@@ -24,14 +24,16 @@ function testsLabel(p: Pull): string {
 type Gate = { label: string; ok: boolean; checked: boolean };
 
 /**
- * The merge gates of the prototype. Tests and approval are known today; the
- * review gates (agent review, findings, spec mapping) wait for those features
- * and show as "not checked yet" without holding the merge back.
+ * The merge gates of the prototype. Tests and approval are always known; the
+ * review gates count once an agent review of the head commit finished, and
+ * spec mapping waits for that feature. Unchecked gates do not hold the merge back.
  */
-function gatesOf(p: Pull, approved: boolean): Gate[] {
+function gatesOf(p: Pull, approved: boolean, review: AgentReview | null | undefined): Gate[] {
+  const reviewed = review?.state === "succeeded" && review.headSha === p.headSha;
+  const serious = reviewed ? review.findings.filter((f) => f.severity !== "low").length : 0;
   return [
-    { label: "Agent review finished", ok: false, checked: false },
-    { label: "No open high or medium findings", ok: false, checked: false },
+    { label: "Agent review finished", ok: reviewed, checked: reviewed },
+    { label: "No open high or medium findings", ok: reviewed && serious === 0, checked: reviewed },
     { label: "Every changed file mapped to a spec", ok: false, checked: false },
     { label: "Tests pass", ok: p.checksState === "passing" || p.checksState === "none", checked: true },
     { label: `Your approval · ${approved ? 1 : 0}/1`, ok: approved, checked: true },
@@ -75,6 +77,7 @@ export function PullDetail() {
   const { project, isPending } = useCurrentProject();
   const pull = usePull(project?.id, pullId);
   const reviews = usePullReviews(project?.id, pullId);
+  const agent = useAgentReview(project?.id, pullId);
   const [tab, setTab] = useState("walk");
 
   if (isPending || (project && pull.isPending)) return null;
@@ -86,7 +89,10 @@ export function PullDetail() {
   const s = STATE[p.state];
   const mine = reviews.data?.[0];
   const approved = mine?.headSha === p.headSha && mine.verdict === "approved";
-  const gates = gatesOf(p, approved);
+  const ar = agent.data;
+  const gates = gatesOf(p, approved, ar);
+  const done = ar?.state === "succeeded";
+  const running = ar?.state === "queued" || ar?.state === "running";
   return (
     <div className="page">
       <div className="head">
@@ -100,7 +106,7 @@ export function PullDetail() {
             <Pill tone={s.tone}>{s.label}</Pill>
             {p.draft && <Pill tone="idle">draft</Pill>}
             <Pill tone={CHECKS[p.checksState].tone}>{testsLabel(p)}</Pill>
-            <Pill tone="idle">not reviewed</Pill>
+            <Pill tone={done ? "ok" : running ? "acc" : "idle"}>{done ? "reviewed" : running ? "reviewing" : "not reviewed"}</Pill>
             <Pill tone="idle">{p.changedFiles} {p.changedFiles === 1 ? "file" : "files"} changed</Pill>
           </div>
         </div>
@@ -108,42 +114,155 @@ export function PullDetail() {
       </div>
 
       <Tabs
-        items={[{ id: "walk", label: "Walkthrough" }, { id: "files", label: `Files · ${p.files.length}` }, { id: "findings", label: "Findings" }]}
+        items={[
+          { id: "walk", label: "Walkthrough" },
+          { id: "files", label: `Files · ${p.files.length}` },
+          { id: "findings", label: `Findings${done && ar.findings.length ? ` · ${ar.findings.length}` : ""}` },
+        ]}
         value={tab}
         onChange={setTab}
       />
 
-      {tab === "walk" && <Walkthrough pull={p} gates={gates} context={project.context} />}
+      {tab === "walk" && <Walkthrough projectId={project.id} projectName={project.name} pull={p} review={ar} gates={gates} context={project.context} onFindings={() => setTab("findings")} />}
       {tab === "files" && <Files projectId={project.id} pull={p} />}
-      {tab === "findings" && <ReviewCard />}
+      {tab === "findings" && <Findings projectId={project.id} projectName={project.name} pull={p} review={ar} />}
     </div>
   );
 }
 
-/** The prototype's card for a PR nobody has reviewed. The review job itself is T3.4; the button stays off until it exists. */
-function ReviewCard() {
+/** Progress of a running review, as the prototype words its stages. */
+function stageOf(r: AgentReview): { label: string; pct: number } {
+  if (r.stage === "reviewing") return { label: "Finder agents looking for bugs", pct: 30 };
+  if (r.stage === "refuting") return { label: "Refuters checking each finding", pct: 60 };
+  if (r.stage === "done") return { label: "Writing the walkthrough", pct: 85 };
+  return { label: "Reading the diff and the linked specs", pct: r.state === "running" ? 10 : 0 };
+}
+
+const BACKEND: Record<NonNullable<AgentReview["backend"]>, string> = {
+  "claude-code": "your Claude subscription",
+  user_key: "your Anthropic API key",
+  api: "the server's Anthropic key",
+};
+
+/**
+ * The review card: "No agent review yet" with the Run button, the stages of
+ * a running review, or why the last one failed. Hidden once a review of the
+ * head commit finished; a review of an older commit offers to run again.
+ */
+function ReviewCard({ projectId, projectName, pull: p, review }: { projectId: string; projectName: string; pull: Pull; review: AgentReview | null | undefined }) {
+  const run = useRunAgentReview(projectId, p.id);
+  const toast = useToast();
+  const start = () => run.mutate(undefined, { onSuccess: () => toast("Agent review started"), onError: (e) => toast(e.message) });
+
+  if (review && (review.state === "queued" || review.state === "running")) {
+    const s = stageOf(review);
+    return (
+      <Card className="stack review-run">
+        <div className="btns" style={{ justifyContent: "space-between" }}>
+          <b>{s.label}…</b>
+          <span className="mono sub" style={{ fontSize: 12 }}>{s.pct}%</span>
+        </div>
+        <div className="bar" role="progressbar" aria-label="Agent review progress" aria-valuenow={s.pct} aria-valuemin={0} aria-valuemax={100}>
+          <i className="b-acc" style={{ width: `${Math.max(s.pct, 4)}%` }} />
+        </div>
+        <span className="sub" style={{ fontSize: 12.5 }}>Reviewer on Claude · uses the {projectName} context and the linked specs.</span>
+      </Card>
+    );
+  }
+  if (review?.state === "succeeded" && review.headSha === p.headSha) return null;
+
+  const stale = review?.state === "succeeded";
+  const failed = review?.state === "failed";
   return (
-    <Card className="stack" >
-      <b style={{ font: "600 16px var(--f-display)" }}>No agent review yet</b>
+    <Card className="stack review-card">
+      <b style={{ font: "600 16px var(--f-display)" }}>{stale ? "New commits since the agent review" : failed ? "The agent review failed" : "No agent review yet"}</b>
+      {failed && review.error && <p className="fail">{review.error}</p>}
       <p className="sub" style={{ fontSize: 13 }}>
-        The reviewer reads the diff against the specs it touches, writes a walkthrough and lists findings. Refuters double-check each finding first, so you only see real ones.
+        {stale
+          ? "The review below is of an earlier commit. Run it again to review what changed since."
+          : "The reviewer reads the diff against the specs it touches, writes a walkthrough and lists findings. Refuters double-check each finding first, so you only see real ones."}
       </p>
       <div className="btns">
-        <Button variant="primary" disabled title="Agent review is not available yet">Run agent review</Button>
-        <span className="sub" style={{ fontSize: 12 }}>Not available yet</span>
+        <Button variant="primary" disabled={run.isPending} onClick={start}>
+          {run.isPending ? "Starting…" : failed || stale ? "Run agent review again" : "Run agent review"}
+        </Button>
       </div>
     </Card>
   );
 }
 
-function Walkthrough({ pull: p, gates, context }: { pull: Pull; gates: Gate[]; context: string }) {
+const SEVERITY: Record<Finding["severity"], PillTone> = { high: "bad", medium: "warn", low: "idle" };
+
+function Findings({ projectId, projectName, pull: p, review }: { projectId: string; projectName: string; pull: Pull; review: AgentReview | null | undefined }) {
+  if (review?.state !== "succeeded") return <ReviewCard projectId={projectId} projectName={projectName} pull={p} review={review} />;
+  return (
+    <div className="stack">
+      <ReviewCard projectId={projectId} projectName={projectName} pull={p} review={review} />
+      {review.findings.length === 0 ? (
+        <Card><p className="sub">No findings. The reviewer and the refuters agree this PR does what its summary says.</p></Card>
+      ) : (
+        review.findings.map((f) => (
+          <Card key={f.id} className={`stack finding f-${f.severity}`}>
+            <div className="btns">
+              <Pill tone={SEVERITY[f.severity]}>{f.severity}</Pill>
+              {f.path && <code style={{ overflowWrap: "anywhere" }}>{f.path}{f.line ? `:${f.line}` : ""}</code>}
+              {f.spec && <span className="id">{f.spec}</span>}
+            </div>
+            <b>{f.title}</b>
+            {f.body && <p>{f.body}</p>}
+            {f.suggestedFix && (
+              <div className="box">
+                <span className="mh">suggested fix</span>
+                {f.suggestedFix}
+              </div>
+            )}
+          </Card>
+        ))
+      )}
+      {review.dropped > 0 && (
+        <p className="sub" style={{ fontSize: 12.5 }}>
+          The refuters dropped {review.dropped} {review.dropped === 1 ? "finding" : "findings"} they could not confirm.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Walkthrough({ projectId, projectName, pull: p, review, gates, context, onFindings }: {
+  projectId: string;
+  projectName: string;
+  pull: Pull;
+  review: AgentReview | null | undefined;
+  gates: Gate[];
+  context: string;
+  onFindings: () => void;
+}) {
+  const done = review?.state === "succeeded";
+  const open = done ? review.findings.length : 0;
   return (
     <div className="row">
       <div className="main stack">
-        <ReviewCard />
+        <ReviewCard projectId={projectId} projectName={projectName} pull={p} review={review} />
         <Card className="stack">
           <span className="lbl">What this PR does</span>
           {stripHtmlComments(p.body).trim() ? <Markdown>{p.body}</Markdown> : <p className="sub">The author did not write a description.</p>}
+          {done && review.walkthrough.trim() && (
+            <>
+              <span className="lbl">Walkthrough</span>
+              <Markdown>{review.walkthrough}</Markdown>
+              {review.backend && (
+                <span className="sub" style={{ fontSize: 12 }}>
+                  Reviewed with {BACKEND[review.backend]}{review.model ? ` · ${review.model}` : ""}.
+                </span>
+              )}
+            </>
+          )}
+          {open > 0 && (
+            <div className="btns" style={{ padding: "10px 12px", borderRadius: 10, background: "var(--warn-soft)" }}>
+              <span style={{ fontSize: 13, marginRight: "auto" }}>{open} open {open === 1 ? "finding" : "findings"} from the reviewer.</span>
+              <Button small onClick={onFindings}>See findings</Button>
+            </div>
+          )}
         </Card>
       </div>
       <div className="aside stack">

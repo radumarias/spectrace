@@ -70,7 +70,7 @@ const refreshProjects = (qc: QueryClient) => void qc.invalidateQueries({ queryKe
 /** Everything a page shows about this project's pull requests. */
 function refreshPulls(qc: QueryClient, projectId: string) {
   void qc.invalidateQueries({ queryKey: pullKeys.all(projectId) });
-  for (const k of ["pull", "pull-diff", "pull-reviews"]) void qc.invalidateQueries({ queryKey: [k, projectId] });
+  for (const k of ["pull", "pull-diff", "pull-reviews", "agent-review"]) void qc.invalidateQueries({ queryKey: [k, projectId] });
 }
 
 /**
@@ -98,12 +98,14 @@ export function useProjectLive(project: Project | undefined) {
     (ev) => {
       if (!id) return;
       if (ev.event === "pr.updated" || ev.event === "repo.pushed") refreshPulls(qc, id);
+      else if (ev.event === "progress" && typeof ev.data.review === "string") void qc.invalidateQueries({ queryKey: ["agent-review", id] }); // a review moved to its next stage
       else {
         refreshProjects(qc);
         if (ev.event === "succeeded") {
           refreshPulls(qc, id); // a sync that finished brings new and changed PRs
           void qc.invalidateQueries({ queryKey: ["specs", id] }); // and an index brings new specs
         }
+        if (ev.event === "failed") void qc.invalidateQueries({ queryKey: ["agent-review", id] }); // a review that gave up says why
       }
     },
     () => {

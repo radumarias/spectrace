@@ -30,8 +30,9 @@ const DIFF = {
 };
 
 /** A fake server that remembers reviews and merges, so the page sees its own writes. */
-function server(pull: Record<string, unknown>, status = 200, refuseMerge = false) {
+function server(pull: Record<string, unknown>, status = 200, refuseMerge = false, agentReview: Record<string, unknown> | null = null) {
   const state = { ...pull };
+  let review = agentReview;
   const reviews: { id: number; verdict: string; body: string; headSha: string; githubReviewId: number; createdAt: string }[] = [];
   const posted: { path: string; body: unknown }[] = [];
   vi.stubGlobal(
@@ -50,6 +51,12 @@ function server(pull: Record<string, unknown>, status = 200, refuseMerge = false
         const r = { id: reviews.length + 1, verdict: body.verdict === "approve" ? "approved" : "changes_requested", body: body.body ?? "", headSha: "abc", githubReviewId: 1, createdAt: "x" };
         reviews.unshift(r);
         return Response.json(r, { status: 201 });
+      }
+      if (path === "/api/projects/p1/pulls/pr-1/agent-review" && req.method === "GET") return Response.json({ review });
+      if (path === "/api/projects/p1/pulls/pr-1/agent-review") {
+        posted.push({ path, body: null });
+        review = { ...REVIEW, state: "queued", stage: "queued", findings: [], dropped: 0, walkthrough: "" };
+        return Response.json({ review }, { status: 202 });
       }
       if (path === "/api/projects/p1/pulls/pr-1/merge") {
         posted.push({ path, body: null });
@@ -273,7 +280,45 @@ it("shows the gates, the review card and the context the reviewer would use", as
   expect(screen.getByText(/Your approval · 0\/1/)).toBeTruthy();
   expect(screen.getByText("2 gates open")).toBeTruthy();
   expect(screen.getByText("Edit context").getAttribute("href")).toBe("/project");
-  expect((screen.getByRole("button", { name: "Run agent review" }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByRole("tab", { name: "Findings" }));
   expect(screen.getByText("No agent review yet")).toBeTruthy();
+});
+
+const REVIEW = {
+  id: "rv-1", pullId: "pr-1", jobId: "j1", headSha: "abc", state: "succeeded", stage: "done", backend: "user_key", model: "claude-opus-5-5", error: null,
+  createdAt: "x", finishedAt: "y", dropped: 2, walkthrough: "The **declined** screen now names the reason.",
+  findings: [{ id: 1, severity: "high", path: "src/pay.rs", line: 7, title: "Charges twice on retry", body: "A new key per attempt.", suggestedFix: "Reuse the order key.", spec: "spec/checkout.md" }],
+};
+
+it("starts an agent review and shows its first stage", async () => {
+  const s = server(PULL);
+  const user = userEvent.setup();
+  at("/pr/pr-1");
+  await user.click(await screen.findByRole("button", { name: "Run agent review" }));
+  expect(await screen.findByText("Reading the diff and the linked specs…")).toBeTruthy();
+  expect(screen.getByText("reviewing")).toBeTruthy();
+  expect(s.posted).toEqual([{ path: "/api/projects/p1/pulls/pr-1/agent-review", body: null }]);
+});
+
+it("shows a finished review: walkthrough, findings and the review gates", async () => {
+  server(PULL, 200, false, REVIEW);
+  const user = userEvent.setup();
+  at("/pr/pr-1");
+  expect(await screen.findByText("declined")).toBeTruthy();
+  expect(screen.getByText("Reviewed with your Anthropic API key · claude-opus-5-5.")).toBeTruthy();
+  expect(screen.getByText("✓ Agent review finished")).toBeTruthy();
+  expect(screen.getByText("○ No open high or medium findings")).toBeTruthy();
+  expect(screen.queryByText("No agent review yet")).toBeNull();
+  await user.click(screen.getByRole("tab", { name: "Findings · 1" }));
+  expect(screen.getByText("Charges twice on retry")).toBeTruthy();
+  expect(screen.getByText("Reuse the order key.")).toBeTruthy();
+  expect(screen.getByText("The refuters dropped 2 findings they could not confirm.")).toBeTruthy();
+});
+
+it("offers to run again when the review is of an older commit", async () => {
+  server(PULL, 200, false, { ...REVIEW, headSha: "old" });
+  at("/pr/pr-1");
+  expect(await screen.findByText("New commits since the agent review")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Run agent review again" })).toBeTruthy();
+  expect(screen.getByText(/○ Agent review finished/)).toBeTruthy(); // not checked for this commit
 });
