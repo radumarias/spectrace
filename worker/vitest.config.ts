@@ -25,6 +25,8 @@ export default defineConfig(async () => {
             GITHUB_WEBHOOK_SECRET: "whsec-test",
             // Claude is faked in test/ai.test.ts, never called.
             ANTHROPIC_BASE_URL: "http://anthropic.test",
+            // Claude Code is faked in test/claude-code.test.ts, never run.
+            CLAUDE_CODE_ORIGIN: "http://claude-code.test",
             // devpage server is faked in test/index-job.test.ts, never run.
             DEVPAGE_ORIGIN: "http://devpage.test",
           },

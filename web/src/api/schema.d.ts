@@ -55,6 +55,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ai/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Send one tiny message to Claude, the way this user's agent work goes (signed-in users)
+         * @description For the owner in CLAUDE_CODE_OWNER, once Claude Code is set up, the message runs through Claude Code on the owner's subscription (`backend: claude-code`). Everyone else goes through the Messages API and AI Gateway with the API key (`backend: api`).
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Claude answered */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "ok";
+                            /** @enum {string} */
+                            backend: "claude-code" | "api";
+                            model: string;
+                            gateway?: string;
+                            reply: string;
+                            ms: number;
+                        };
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Claude Code, AI Gateway or Anthropic refused the call */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Neither Claude Code nor an Anthropic key is configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/github/login": {
         parameters: {
             query?: never;

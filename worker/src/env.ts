@@ -1,3 +1,4 @@
+import type { ClaudeCodeRunner } from "./claude-code-container";
 import type { DevpageServer } from "./devpage-container";
 import type { ProjectHub } from "./hub";
 import type { JobMessage } from "./jobs/queue";
@@ -41,6 +42,14 @@ export interface Bindings {
   AI_GATEWAY_ID?: string;
   /** Overrides the gateway URL (tests). */
   ANTHROPIC_BASE_URL?: string;
+  /** Claude Code in a Cloudflare Container on the owner's Claude subscription (src/claude-code.ts). Used only once CLAUDE_CODE_OAUTH_TOKEN is set. */
+  CLAUDE_CODE?: DurableObjectNamespace<ClaudeCodeRunner>;
+  /** Secret: a token from `claude setup-token` (Pro, Max, Ultra, Team or Enterprise plan). */
+  CLAUDE_CODE_OAUTH_TOKEN?: string;
+  /** The one GitHub login whose work may run on that subscription; everyone else uses the API key. Unset, nobody does. */
+  CLAUDE_CODE_OWNER?: string;
+  /** A Claude Code server reached over HTTP instead of the container: a local one, or a fake in tests. */
+  CLAUDE_CODE_ORIGIN?: string;
   /** Overrides for tests: default `https://github.com` and `https://api.github.com`. */
   GITHUB_OAUTH_URL?: string;
   GITHUB_API_URL?: string;

@@ -69,6 +69,23 @@ class_name = "DevpageServer"
 tag = "v2"
 new_sqlite_classes = ["DevpageServer"]
 
+# Claude Code (the unmodified CLI, headless) on the owner's Claude subscription
+# runs agent work. It is used only once CLAUDE_CODE_OAUTH_TOKEN is set, and
+# only for CLAUDE_CODE_OWNER's work; see docs/deploy.md and src/claude-code.ts.
+[[containers]]
+class_name = "ClaudeCodeRunner"
+image = "../containers/claude-code/Dockerfile"
+max_instances = 1
+instance_type = "standard-2"
+
+[[durable_objects.bindings]]
+name = "CLAUDE_CODE"
+class_name = "ClaudeCodeRunner"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["ClaudeCodeRunner"]
+
 # `just dev` and the tests need no Docker: the container is never built
 # locally. Point DEVPAGE_ORIGIN at a `devpage server` in .dev.vars to try it.
 [dev]
