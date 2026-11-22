@@ -6,6 +6,7 @@ import { log } from "./log";
 import { registerAi } from "./routes/ai";
 import { registerAuth } from "./routes/auth";
 import { registerBoards } from "./routes/boards";
+import { registerClaude } from "./routes/claude";
 import { registerGithub } from "./routes/github";
 import { registerHealth } from "./routes/health";
 import { registerJobs } from "./routes/jobs";
@@ -39,6 +40,7 @@ export function createApp() {
   registerHealth(app);
   registerAi(app);
   registerAuth(app);
+  registerClaude(app);
   registerGithub(app);
   registerWebhook(app);
   registerProjects(app);

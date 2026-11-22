@@ -96,6 +96,19 @@ One-time setup:
 
 Until `CLAUDE_CODE_OAUTH_TOKEN` is set, the container is never started and everything uses the API key. Renew the token before it expires (a year after step 1): rerun step 1 and `wrangler secret put` again. To try it locally, build and run the image (`docker build -t spectrace-claude-code containers/claude-code && docker run -p 8080:8080 -e CLAUDE_CODE_OAUTH_TOKEN spectrace-claude-code`) and put `CLAUDE_CODE_ORIGIN=http://127.0.0.1:8080` and `CLAUDE_CODE_OWNER=<your login>` in `worker/.dev.vars`.
 
+## Each user's own API key
+
+Other users bring their own Anthropic API key: on the **Runners** page they paste a key from console.anthropic.com, and their agent work is billed to their Anthropic account. Keys are stored in D1 encrypted with AES-GCM (`worker/src/user-keys.ts`), bound to the user's id, and are never returned by the API; the page shows only the last four characters. spectrace never asks for or stores a Claude subscription token (Anthropic's terms forbid apps collecting them), and the API refuses one.
+
+One-time setup, a random 32-byte encryption key:
+
+```sh
+cd worker
+openssl rand -base64 32 | npx wrangler secret put SECRETS_KEY
+```
+
+Keep it: losing or changing it makes every saved key unreadable, and users have to paste theirs again. Until it is set, the Runners page says the server can't save keys. Which Claude a user's work uses, in order: the owner's subscription (above), the user's own key, the server's `ANTHROPIC_API_KEY`.
+
 ## Cost
 
 Workers, D1 and static assets are all within the free plan for this app at its current size. The devpage and Claude Code containers need the Workers Paid plan; they sleep after 30 and 10 minutes without requests, and R2 storage for spec versions is small.

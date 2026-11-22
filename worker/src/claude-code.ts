@@ -10,14 +10,16 @@
 // Anthropic's terms allow a person to sign in to the unmodified Claude Code
 // binary with their own subscription, but not to route other people's
 // requests through it. So the subscription is used only for the one GitHub
-// login in `CLAUDE_CODE_OWNER`; everyone else, and everything when Claude
-// Code is not set up, goes through the API key path (src/ai.ts).
+// login in `CLAUDE_CODE_OWNER`; everyone else uses their own API key
+// (src/user-keys.ts) or the server's, through src/ai.ts.
 import { createMessage } from "./ai";
 import type { Bindings } from "./env";
 import { AppError } from "./error";
 import { log } from "./log";
+import { userKey } from "./user-keys";
 
-export type AgentBackend = "claude-code" | "api";
+/** `claude-code`: the owner's subscription; `user_key`: the user's own API key; `api`: the server's API key. */
+export type AgentBackend = "claude-code" | "user_key" | "api";
 
 export interface ClaudeCodeRequest {
   prompt: string;
@@ -99,22 +101,22 @@ export interface AskResult {
 }
 
 /**
- * One prompt, one answer, for work done on behalf of `login`: through Claude
- * Code on the subscription when that is allowed for them, else through the
- * Messages API and AI Gateway with the API key.
+ * One prompt, one answer, for work done on behalf of `user`: through Claude
+ * Code on the subscription when they are its owner; else with their own API
+ * key when they saved one; else with the server's API key. The last two go
+ * through the Messages API and AI Gateway.
  */
-export async function ask(env: Bindings, login: string, req: AskRequest): Promise<AskResult> {
-  if (subscriptionFor(env, login)) {
+export async function ask(env: Bindings, user: { id: string; login: string }, req: AskRequest): Promise<AskResult> {
+  if (subscriptionFor(env, user.login)) {
     const out = await runClaudeCode(env, { prompt: req.prompt, model: req.model, system: req.system, maxTurns: 1 });
     return { backend: "claude-code", model: out.model ?? req.model, text: out.result.trim() };
   }
-  const out = await createMessage(env, {
+  const own = env.SECRETS_KEY ? await userKey(env, user.id) : null;
+  const out = await createMessage(own ? { ...env, ANTHROPIC_API_KEY: own } : env, {
     model: req.model,
     max_tokens: req.maxTokens,
     messages: [{ role: "user", content: req.prompt }],
     ...(req.system ? { system: req.system } : {}),
   });
-  return { backend: "api", model: out.model, text: out.content.map((b) => b.text ?? "").join("").trim() };
+  return { backend: own ? "user_key" : "api", model: out.model, text: out.content.map((b) => b.text ?? "").join("").trim() };
 }
-
-

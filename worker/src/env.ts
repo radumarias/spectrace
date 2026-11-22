@@ -50,6 +50,8 @@ export interface Bindings {
   CLAUDE_CODE_OWNER?: string;
   /** A Claude Code server reached over HTTP instead of the container: a local one, or a fake in tests. */
   CLAUDE_CODE_ORIGIN?: string;
+  /** Secret: 32 random bytes as base64 (`openssl rand -base64 32`), the AES-GCM key for users' saved API keys (src/user-keys.ts). Saving keys answers 503 until set. */
+  SECRETS_KEY?: string;
   /** Overrides for tests: default `https://github.com` and `https://api.github.com`. */
   GITHUB_OAUTH_URL?: string;
   GITHUB_API_URL?: string;
