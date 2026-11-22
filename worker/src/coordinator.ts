@@ -14,6 +14,7 @@
 import { MODELS } from "./ai";
 import { type BoardContent, type BoardOp, boardText, cleanOps } from "./board-ops";
 import { type AgentBackend, ask } from "./claude-code";
+import { cleanReqOps, type ReqOp, type SetContent, setText } from "./requirement-ops";
 import { log } from "./log";
 
 /** What the user is looking at, sent with each message. */
@@ -22,6 +23,7 @@ export interface Screen {
   pullId?: string;
   specId?: string;
   boardId?: string;
+  setId?: string;
 }
 
 /** Reads one API path as the user: `null` body and the status when it fails. */
@@ -217,7 +219,26 @@ export function boardPrompt(): string {
   ].join("\n");
 }
 
-export function systemPrompt(onBoard = false): string {
+/** How the coordinator revises a requirements set: ids are the contract, so it edits and never renumbers. */
+export function reqPrompt(): string {
+  return [
+    "",
+    "On a requirements set (the prompt then shows it): the user revises the requirements through you. Make the change they ask for in the same reply, then say in one or two sentences what changed, by id.",
+    'Add "requirements" to the reply shape: {"reply":"...","requirements":[<op>, ...]} with at most twelve ops, applied in order:',
+    '- {"op":"edit","flow":"<flow id>","edit":<edit>} where <edit> is one of:',
+    '  {"op":"addRequirement","node":"<node>","condition":"<trigger>","response":"<behaviour>"} (the tag is assigned for you),',
+    '  {"op":"setRequirement","node":"<node>","tag":"r2","condition":"...","response":"..."}, {"op":"removeRequirement","node":"<node>","tag":"r2"},',
+    '  {"op":"addStep","node":"<new snake_case id>","label":"<box label>","from":"<node, optional>","edgeLabel":"<arrow label>"}, {"op":"renameStep","node":"<node>","label":"<new label>"}, {"op":"removeStep","node":"<node>"},',
+    '  {"op":"addEdge","from":"<node>","label":"<label>","to":"<node>"}, {"op":"removeEdge",...same}, {"op":"relabelEdge","from":"..","label":"<old>","to":"..","newLabel":"<new>"}',
+    '- {"op":"addFlow","flow":"<new flow id>","title":"<title>","source":"<whole spec file, same format as the others>"}, {"op":"removeFlow","flow":"<flow id>"}',
+    '- {"op":"addView","of":"<step or requirement id, or null>","kind":"mockup|diagram|note","title":"..","text":".."}, {"op":"setView","id":"v2","title":"..","text":"<whole new text>","of":".."} (fields optional), {"op":"removeView","id":"v2"}',
+    '- {"op":"title","text":"<set title>"}',
+    "Ids are a contract with specs, code and tests: never renumber, never reuse a removed id, and prefer setRequirement over remove plus add when the meaning stays the same. To split a requirement, keep the first part in its tag with setRequirement and add the rest. Node ids are lowercase snake_case.",
+    "A requirement is one behaviour: a trigger (WHEN) and one response (THE SYSTEM SHALL), without the words WHEN or THE SYSTEM SHALL inside them, with concrete values.",
+  ].join("\n");
+}
+
+export function systemPrompt(onBoard = false, onSet = false): string {
   return [
     "You are the coordinator in spectrace, a spec-driven pull request review app. You are the main agent the user chats with.",
     "You answer questions about their project, pull requests, merge gates, specs and agents, and you hand work to other agents.",
@@ -236,6 +257,7 @@ export function systemPrompt(onBoard = false): string {
     ...AGENTS.map((a) => `- ${a.kind}: start the ${a.name} agent, which ${a.does}${a.kind === "review_pull" ? " (pullId)" : a.kind === "draft_requirements" ? " (boardId)" : ""}.`),
     "Use ids from tool results for pullId, never a PR number.",
     ...(onBoard ? [boardPrompt()] : []),
+    ...(onSet ? [reqPrompt()] : []),
   ].join("\n");
 }
 
@@ -249,12 +271,14 @@ function screenLine(s: Screen): string {
   if (s.pullId) parts.push(`pull id=${s.pullId}`);
   if (s.specId) parts.push(`spec id=${s.specId}`);
   if (s.boardId) parts.push(`board id=${s.boardId}`);
+  if (s.setId) parts.push(`requirements set id=${s.setId}`);
   return parts.join(", ");
 }
 
-export function buildPrompt(o: { projectName: string; history: Turn[]; question: string; screen: Screen; board?: { id: string } & BoardContent; results: { call: ToolCall; result: unknown }[]; last: boolean }): string {
+export function buildPrompt(o: { projectName: string; history: Turn[]; question: string; screen: Screen; board?: { id: string } & BoardContent; set?: { id: string } & SetContent; results: { call: ToolCall; result: unknown }[]; last: boolean }): string {
   const lines = [`Project: ${o.projectName}`, `The user is on: ${screenLine(o.screen)}`];
   if (o.board) lines.push("", boardText(o.board.id, o.board));
+  if (o.set) lines.push("", setText(o.set.id, o.set));
   if (o.history.length) {
     lines.push("", "Conversation so far:");
     for (const t of o.history) lines.push(`${t.role === "user" ? "User" : "Coordinator"}: ${t.text}`);
@@ -268,7 +292,7 @@ export function buildPrompt(o: { projectName: string; history: Turn[]; question:
   return lines.join("\n");
 }
 
-export type Parsed = { kind: "tools"; calls: ToolCall[] } | { kind: "reply"; text: string; actions: Action[]; board?: BoardOp[] };
+export type Parsed = { kind: "tools"; calls: ToolCall[] } | { kind: "reply"; text: string; actions: Action[]; board?: BoardOp[]; requirements?: ReqOp[] };
 
 /** The first balanced `{...}` in `text`, or null. */
 function firstObject(text: string): string | null {
@@ -349,7 +373,8 @@ export function parseAnswer(text: string): Parsed {
   if (o && typeof o.reply === "string") {
     const actions = (Array.isArray(o.actions) ? o.actions : []).map(cleanAction).filter((a): a is Action => a !== null).slice(0, 2);
     const board = cleanOps(o.board);
-    return board.length ? { kind: "reply", text: o.reply.trim(), actions, board } : { kind: "reply", text: o.reply.trim(), actions };
+    const requirements = cleanReqOps(o.requirements);
+    return { kind: "reply", text: o.reply.trim(), actions, ...(board.length ? { board } : {}), ...(requirements.length ? { requirements } : {}) };
   }
   return { kind: "reply", text: text.trim(), actions: [] };
 }
@@ -360,6 +385,8 @@ export interface Answer {
   actions: Action[];
   /** Changes to the board the user is on; empty when not on a board. */
   board: BoardOp[];
+  /** Changes to the requirements set the user is on; empty when not on one. */
+  requirements: ReqOp[];
   backend: AgentBackend;
 }
 
@@ -369,7 +396,7 @@ export const MAX_ROUNDS = 4;
 export async function answer(
   env: Parameters<typeof ask>[0],
   user: { id: string; login: string },
-  o: { projectId: string; projectName: string; history: Turn[]; question: string; screen: Screen; board?: { id: string } & BoardContent; get: ApiGet },
+  o: { projectId: string; projectName: string; history: Turn[]; question: string; screen: Screen; board?: { id: string } & BoardContent; set?: { id: string } & SetContent; get: ApiGet },
 ): Promise<Answer> {
   const results: { call: ToolCall; result: unknown }[] = [];
   let backend: AgentBackend = "api";
@@ -377,16 +404,17 @@ export async function answer(
     const last = round === MAX_ROUNDS;
     const out = await ask(env, user, {
       model: MODELS.sonnet,
-      maxTokens: o.board ? 6000 : 1200,
-      system: systemPrompt(!!o.board),
-      prompt: buildPrompt({ projectName: o.projectName, history: o.history, question: o.question, screen: o.screen, board: o.board, results, last }),
+      maxTokens: o.board || o.set ? 8000 : 1200,
+      system: systemPrompt(!!o.board, !!o.set),
+      prompt: buildPrompt({ projectName: o.projectName, history: o.history, question: o.question, screen: o.screen, board: o.board, set: o.set, results, last }),
     });
     backend = out.backend;
     const parsed = parseAnswer(out.text);
     if (parsed.kind === "reply" || last) {
       const reply = parsed.kind === "reply" ? parsed : { text: "I could not finish looking that up. Try asking it a narrower way.", actions: [] };
       const board = o.board && parsed.kind === "reply" ? (parsed.board ?? []) : [];
-      return { text: reply.text || "…", tools: results.map((r) => callLabel(r.call)), actions: reply.actions, board, backend };
+      const requirements = o.set && parsed.kind === "reply" ? (parsed.requirements ?? []) : [];
+      return { text: reply.text || "…", tools: results.map((r) => callLabel(r.call)), actions: reply.actions, board, requirements, backend };
     }
     for (const call of parsed.calls) {
       const tool = TOOLS.find((t) => t.name === call.name);
@@ -401,5 +429,5 @@ export async function answer(
     }
   }
   /* c8 ignore next */
-  return { text: "…", tools: [], actions: [], board: [], backend };
+  return { text: "…", tools: [], actions: [], board: [], requirements: [], backend };
 }

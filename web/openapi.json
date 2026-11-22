@@ -1567,6 +1567,39 @@
             ],
             "description": "The coordinator's changes to the whiteboard the user was on, already applied; null when it changed nothing."
           },
+          "requirements": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "setId": {
+                "type": "string"
+              },
+              "changes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "What changed, by id, such as `Added checkout.pay/r3`."
+              },
+              "skipped": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Changes the coordinator asked for that could not be made, and why."
+              },
+              "undone": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "setId",
+              "changes",
+              "skipped",
+              "undone"
+            ],
+            "description": "The coordinator's changes to the requirements set the user was on, already applied; null when it changed nothing."
+          },
           "createdAt": {
             "type": "string"
           }
@@ -1579,6 +1612,7 @@
           "actions",
           "ran",
           "board",
+          "requirements",
           "createdAt"
         ]
       },
@@ -1670,65 +1704,9 @@
         ],
         "description": "The whiteboard after the coordinator's change (or its undo)."
       },
-      "CoordinatorScreen": {
-        "type": "object",
-        "properties": {
-          "route": {
-            "type": "string",
-            "maxLength": 40
-          },
-          "pullId": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "specId": {
-            "type": "string",
-            "maxLength": 64
-          },
-          "boardId": {
-            "type": "string",
-            "maxLength": 64
-          }
-        },
-        "required": [
-          "route"
-        ],
-        "description": "What the user is looking at."
-      },
-      "RequirementSetSummary": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "boardId": {
-            "type": "string",
-            "nullable": true
-          },
-          "flows": {
-            "type": "integer"
-          },
-          "requirements": {
-            "type": "integer"
-          },
-          "updatedAt": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "title",
-          "boardId",
-          "flows",
-          "requirements",
-          "updatedAt"
-        ]
-      },
       "RequirementSet": {
         "type": "object",
+        "nullable": true,
         "properties": {
           "id": {
             "type": "string"
@@ -1856,6 +1834,67 @@
           "kind",
           "title",
           "text"
+        ]
+      },
+      "CoordinatorScreen": {
+        "type": "object",
+        "properties": {
+          "route": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "pullId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "specId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "boardId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "setId": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "route"
+        ],
+        "description": "What the user is looking at."
+      },
+      "RequirementSetSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "boardId": {
+            "type": "string",
+            "nullable": true
+          },
+          "flows": {
+            "type": "integer"
+          },
+          "requirements": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "boardId",
+          "flows",
+          "requirements",
+          "updatedAt"
         ]
       }
     },
@@ -4620,7 +4659,7 @@
         },
         "responses": {
           "200": {
-            "description": "Your message and the coordinator's reply; `board` is the whiteboard after the coordinator changed it, when it did",
+            "description": "Your message and the coordinator's reply; `board` is the whiteboard and `requirementSet` the requirements set after the coordinator changed them, when it did",
             "content": {
               "application/json": {
                 "schema": {
@@ -4634,11 +4673,15 @@
                     },
                     "board": {
                       "$ref": "#/components/schemas/CoordinatorBoard"
+                    },
+                    "requirementSet": {
+                      "$ref": "#/components/schemas/RequirementSet"
                     }
                   },
                   "required": [
                     "messages",
-                    "board"
+                    "board",
+                    "requirementSet"
                   ]
                 }
               }
@@ -4860,8 +4903,8 @@
     },
     "/api/projects/{projectId}/coordinator/{messageId}/undo": {
       "post": {
-        "summary": "Undo the coordinator's change to the whiteboard",
-        "description": "Puts the board back as it was before this reply changed it. Only while nobody changed the board since; otherwise 409.",
+        "summary": "Undo the coordinator's change to the whiteboard or the requirements set",
+        "description": "Puts the board or the set back as it was before this reply changed it. Only while nobody changed it since; otherwise 409.",
         "parameters": [
           {
             "schema": {
@@ -4884,7 +4927,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The message, now undone, and the board as it was",
+            "description": "The message, now undone, and the board or set as it was",
             "content": {
               "application/json": {
                 "schema": {
@@ -4898,11 +4941,15 @@
                     },
                     "board": {
                       "$ref": "#/components/schemas/CoordinatorBoard"
+                    },
+                    "requirementSet": {
+                      "$ref": "#/components/schemas/RequirementSet"
                     }
                   },
                   "required": [
                     "messages",
-                    "board"
+                    "board",
+                    "requirementSet"
                   ]
                 }
               }

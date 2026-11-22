@@ -104,3 +104,68 @@ test("Draft requirements turns the board into flows, ids, mockups and diagrams",
   await expect(page.getByText("Requirements from this board:")).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+// Requirements studio, phase 3: on a set the coordinator sits beside it; asking for a change
+// edits only that part, lists it by id under the reply, and Undo puts it back.
+test("the coordinator revises the requirements by id, and Undo takes it back", async ({ page }) => {
+  const R3 = "- WHEN the bank takes over 10 seconds THE SYSTEM SHALL show a spinner. {#r3}";
+  const pay = MODEL.sections[1]!;
+  const REVISED = {
+    ...SET,
+    updatedAt: "2026-11-22T13:06:00.000Z",
+    flows: [{
+      ...SET.flows[0]!,
+      source: SOURCE.replace("show the reason. {#r2}\n", `show the reason. {#r2}\n${R3}\n`),
+      model: { ...MODEL, sections: [MODEL.sections[0]!, { ...pay, requirements: [...pay.requirements, req("r3", "the bank takes over 10 seconds", "show a spinner", 18)] }] },
+    }],
+    ids: [...SET.ids, "checkout.pay/r3"],
+  };
+  const edit = { setId: "s1", changes: ["Added checkout.pay/r3"], skipped: [], undone: false };
+  const msg = (id: string, role: string, text: string, extra = {}) => ({ id, role, text, tools: [], actions: [], ran: [], board: null, requirements: null, createdAt: "2026-11-22T13:00:00Z", ...extra });
+  let asked: unknown = null;
+  await mockApi(page, {
+    "/api/me": USER,
+    "/api/projects": [PROJECT],
+    "/api/projects/p1/pulls": { pulls: [], counts: { needs: 0, open: 0, merged: 0 } },
+    "/api/projects/p1/requirements": [],
+    "/api/projects/p1/requirements/s1": SET,
+    "/api/projects/p1/coordinator": (r: Request) => {
+      if (r.method() === "GET") return { messages: [] };
+      asked = r.postDataJSON();
+      return {
+        messages: [msg("m1", "user", "Show a spinner when the bank is slow"), msg("m2", "coordinator", "Added checkout.pay/r3 for a slow bank.", { requirements: edit })],
+        board: null,
+        requirementSet: REVISED,
+      };
+    },
+    "/api/projects/p1/coordinator/m2/undo": () => ({
+      messages: [msg("m2", "coordinator", "Added checkout.pay/r3 for a slow bank.", { requirements: { ...edit, undone: true } })],
+      board: null,
+      requirementSet: { ...SET, ids: REVISED.ids, updatedAt: "2026-11-22T13:07:00.000Z" },
+    }),
+  });
+  await page.addInitScript(() => localStorage.setItem("spectrace-proj", "p1"));
+  const errors = trackErrors(page);
+  await page.goto("/req/s1");
+  await expect(page.getByRole("heading", { name: "Checkout", level: 1 })).toBeVisible();
+  const panel = page.getByRole("complementary", { name: "Coordinator" });
+  const wide = (page.viewportSize()?.width ?? 0) > 1100;
+  if (!wide) await page.getByRole("button", { name: /coordinator/ }).first().click();
+  await expect(panel.getByText("every id that already exists stays the same", { exact: false })).toBeVisible();
+  await panel.getByLabel("Message the coordinator").fill("Show a spinner when the bank is slow");
+  await panel.getByRole("button", { name: "Send" }).click();
+  await expect(panel.getByLabel("Changes to the requirements").getByText("Added checkout.pay/r3")).toBeVisible();
+  expect(asked).toEqual({ text: "Show a spinner when the bank is slow", screen: { route: "req", setId: "s1" } });
+  if (!wide) await panel.getByRole("button", { name: "Close" }).click();
+  const step = page.getByRole("region", { name: "Step Pay" });
+  await expect(step.getByText("checkout.pay/r3", { exact: true })).toBeVisible();
+  await expect(step.getByText("checkout.pay/r1", { exact: true })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+
+  if (!wide) await page.getByRole("button", { name: /coordinator/ }).first().click();
+  await panel.getByRole("button", { name: "Undo" }).click();
+  await expect(panel.getByText("Undone")).toBeVisible();
+  if (!wide) await panel.getByRole("button", { name: "Close" }).click();
+  await expect(step.getByText("checkout.pay/r3", { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

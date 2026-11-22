@@ -2632,7 +2632,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Your message and the coordinator's reply; `board` is the whiteboard after the coordinator changed it, when it did */
+                /** @description Your message and the coordinator's reply; `board` is the whiteboard and `requirementSet` the requirements set after the coordinator changed them, when it did */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2641,6 +2641,7 @@ export interface paths {
                         "application/json": {
                             messages: components["schemas"]["CoordinatorMessage"][];
                             board: components["schemas"]["CoordinatorBoard"];
+                            requirementSet: components["schemas"]["RequirementSet"];
                         };
                     };
                 };
@@ -2831,8 +2832,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Undo the coordinator's change to the whiteboard
-         * @description Puts the board back as it was before this reply changed it. Only while nobody changed the board since; otherwise 409.
+         * Undo the coordinator's change to the whiteboard or the requirements set
+         * @description Puts the board or the set back as it was before this reply changed it. Only while nobody changed it since; otherwise 409.
          */
         post: {
             parameters: {
@@ -2846,7 +2847,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The message, now undone, and the board as it was */
+                /** @description The message, now undone, and the board or set as it was */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2855,6 +2856,7 @@ export interface paths {
                         "application/json": {
                             messages: components["schemas"]["CoordinatorMessage"][];
                             board: components["schemas"]["CoordinatorBoard"];
+                            requirementSet: components["schemas"]["RequirementSet"];
                         };
                     };
                 };
@@ -3529,6 +3531,15 @@ export interface components {
                 changes: string[];
                 undone: boolean;
             } | null;
+            /** @description The coordinator's changes to the requirements set the user was on, already applied; null when it changed nothing. */
+            requirements: {
+                setId: string;
+                /** @description What changed, by id, such as `Added checkout.pay/r3`. */
+                changes: string[];
+                /** @description Changes the coordinator asked for that could not be made, and why. */
+                skipped: string[];
+                undone: boolean;
+            } | null;
             createdAt: string;
         };
         /** @description Something the coordinator proposes. Nothing runs until the user clicks it. */
@@ -3555,21 +3566,6 @@ export interface components {
             createdAt: string;
             updatedAt: string;
         } | null;
-        /** @description What the user is looking at. */
-        CoordinatorScreen: {
-            route: string;
-            pullId?: string;
-            specId?: string;
-            boardId?: string;
-        };
-        RequirementSetSummary: {
-            id: string;
-            title: string;
-            boardId: string | null;
-            flows: number;
-            requirements: number;
-            updatedAt: string;
-        };
         RequirementSet: {
             id: string;
             title: string;
@@ -3580,7 +3576,7 @@ export interface components {
             ids: string[];
             createdAt: string;
             updatedAt: string;
-        };
+        } | null;
         RequirementFlow: {
             /** @example checkout */
             flow: string;
@@ -3609,6 +3605,22 @@ export interface components {
             kind: "mockup" | "diagram" | "note";
             title: string;
             text: string;
+        };
+        /** @description What the user is looking at. */
+        CoordinatorScreen: {
+            route: string;
+            pullId?: string;
+            specId?: string;
+            boardId?: string;
+            setId?: string;
+        };
+        RequirementSetSummary: {
+            id: string;
+            title: string;
+            boardId: string | null;
+            flows: number;
+            requirements: number;
+            updatedAt: string;
         };
     };
     responses: never;

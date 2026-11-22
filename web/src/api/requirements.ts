@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type { components } from "./schema";
 
-export type RequirementSet = components["schemas"]["RequirementSet"];
+export type RequirementSet = NonNullable<components["schemas"]["RequirementSet"]>;
 export type RequirementSetSummary = components["schemas"]["RequirementSetSummary"];
 export type RequirementFlow = components["schemas"]["RequirementFlow"];
 export type RequirementView = components["schemas"]["RequirementView"];
