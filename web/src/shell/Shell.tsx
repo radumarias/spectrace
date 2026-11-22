@@ -7,6 +7,7 @@ import { useMe, useProjects, useSignOut } from "../api/queries";
 import { useTheme } from "../theme";
 import { Button } from "../ui/parts";
 import { Icon } from "../ui/Icon";
+import { Coordinator } from "./Coordinator";
 import { GROUPS, ROOT_ROUTES, TABS } from "./nav";
 
 /** Badge counts come from the API; pages without data of their own get none. */
@@ -103,23 +104,7 @@ export function Shell() {
         <Outlet />
       </main>
 
-      <aside className="ask" id="ask" aria-label="Coordinator" hidden={!askOpen}>
-        <div className="ask-h">
-          <b style={{ font: "600 16px var(--f-display)" }}>Coordinator</b>
-          <Button variant="ghost" small onClick={() => setAskOpen(false)}>Close</Button>
-        </div>
-        <div className="msgs" aria-live="polite">
-          <div className="msg">
-            <span className="by">Coordinator</span>
-            Hi. I can see what you are looking at, and I can act on anything you can click. Ask me what needs you, or tell me what to change.
-          </div>
-        </div>
-        <form className="composer" onSubmit={(e) => e.preventDefault()}>
-          <label className="sr" htmlFor="ask-input">Message the coordinator</label>
-          <input id="ask-input" autoComplete="off" placeholder="Ask, or say what to change…" />
-          <Button variant="primary" type="submit">Send</Button>
-        </form>
-      </aside>
+      <Coordinator open={askOpen} onClose={() => setAskOpen(false)} pathname={pathname} project={current} />
 
       {!root && (
         <nav className="tabbar" aria-label="Main">
