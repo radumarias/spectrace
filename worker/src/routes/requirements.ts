@@ -73,7 +73,7 @@ const SetSummary = z
     updatedAt: z.string(),
   })
   .openapi("RequirementSetSummary");
-const RequirementSet = z
+export const RequirementSet = z
   .object({
     id: z.string(),
     title: z.string(),
@@ -165,7 +165,7 @@ const deleteRoute = createRoute({
   },
 });
 
-type Row = {
+export type SetRow = {
   id: string;
   title: string;
   board_id: string | null;
@@ -175,7 +175,7 @@ type Row = {
   created_at: string;
   updated_at: string;
 };
-const COLS = "id, title, board_id, flows, views, ids, created_at, updated_at";
+export const SET_COLS = "id, title, board_id, flows, views, ids, created_at, updated_at";
 const parse = <T>(s: string, fallback: T): T => {
   try {
     return JSON.parse(s) as T;
@@ -185,7 +185,7 @@ const parse = <T>(s: string, fallback: T): T => {
 };
 
 export const toSet = async (
-  r: Row,
+  r: SetRow,
 ): Promise<z.infer<typeof RequirementSet>> => {
   const { checkFlow } = await import("../requirements");
   return {
@@ -209,10 +209,10 @@ export function registerRequirements(app: OpenAPIHono<AppEnv>) {
     const { projectId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, user.id, projectId);
     const { results } = await c.env.DB.prepare(
-      `SELECT ${COLS} FROM requirement_sets WHERE project_id = ?1 ORDER BY updated_at DESC`,
+      `SELECT ${SET_COLS} FROM requirement_sets WHERE project_id = ?1 ORDER BY updated_at DESC`,
     )
       .bind(projectId)
-      .all<Row>();
+      .all<SetRow>();
     return c.json(
       results.map((r) => {
         const ids = parse<string[]>(r.ids, []);
@@ -269,7 +269,7 @@ export function registerRequirements(app: OpenAPIHono<AppEnv>) {
       throw e;
     }
     const row = await c.env.DB.prepare(
-      `INSERT INTO requirement_sets (id, project_id, board_id, title, flows, views, ids, backend) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) RETURNING ${COLS}`,
+      `INSERT INTO requirement_sets (id, project_id, board_id, title, flows, views, ids, backend) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) RETURNING ${SET_COLS}`,
     )
       .bind(
         crypto.randomUUID(),
@@ -287,7 +287,7 @@ export function registerRequirements(app: OpenAPIHono<AppEnv>) {
         JSON.stringify(drafted.ids),
         drafted.backend,
       )
-      .first<Row>();
+      .first<SetRow>();
     if (!row)
       throw new AppError("internal", "requirement set insert returned no row");
     return c.json(await toSet(row), 201);
@@ -298,10 +298,10 @@ export function registerRequirements(app: OpenAPIHono<AppEnv>) {
     const { projectId, setId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, user.id, projectId);
     const row = await c.env.DB.prepare(
-      `SELECT ${COLS} FROM requirement_sets WHERE id = ?1 AND project_id = ?2`,
+      `SELECT ${SET_COLS} FROM requirement_sets WHERE id = ?1 AND project_id = ?2`,
     )
       .bind(setId, projectId)
-      .first<Row>();
+      .first<SetRow>();
     if (!row) throw AppError.notFound(`requirement set ${setId}`);
     return c.json(await toSet(row), 200);
   });

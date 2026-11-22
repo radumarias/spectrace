@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { boardKeys } from "./boards";
 import { api } from "./client";
+import { reqKeys } from "./requirements";
 import type { components } from "./schema";
 
 export type CoordinatorMessage = components["schemas"]["CoordinatorMessage"];
 export type CoordinatorAction = components["schemas"]["CoordinatorAction"];
 export type CoordinatorScreen = components["schemas"]["CoordinatorScreen"];
 type CoordinatorBoard = NonNullable<components["schemas"]["CoordinatorBoard"]>;
+type RequirementSet = NonNullable<components["schemas"]["RequirementSet"]>;
 
 const key = (projectId: string) => ["coordinator", projectId] as const;
 
@@ -46,8 +48,15 @@ export function useAskCoordinator(projectId: string) {
     onSuccess: (out) => {
       qc.setQueryData<CoordinatorMessage[]>(key(projectId), (old) => append(old, out.messages));
       if (out.board) drew(qc, projectId, out.board);
+      if (out.requirementSet) revised(qc, projectId, out.requirementSet);
     },
   });
+}
+
+/** The coordinator changed a requirements set: the open page shows the new version. */
+function revised(qc: ReturnType<typeof useQueryClient>, projectId: string, set: RequirementSet) {
+  qc.setQueryData(reqKeys.one(projectId, set.id), set);
+  void qc.invalidateQueries({ queryKey: reqKeys.all(projectId), exact: true });
 }
 
 /** The coordinator changed a board: the open board page takes the new version. */
@@ -56,7 +65,7 @@ function drew(qc: ReturnType<typeof useQueryClient>, projectId: string, board: C
   void qc.invalidateQueries({ queryKey: boardKeys.all(projectId), exact: true });
 }
 
-/** Undo the coordinator's change to the whiteboard. */
+/** Undo the coordinator's change to the whiteboard or the requirements set. */
 export function useUndoBoard(projectId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -68,6 +77,7 @@ export function useUndoBoard(projectId: string) {
     onSuccess: (out) => {
       qc.setQueryData<CoordinatorMessage[]>(key(projectId), (old) => append(old, out.messages));
       if (out.board) drew(qc, projectId, out.board);
+      if (out.requirementSet) revised(qc, projectId, out.requirementSet);
     },
   });
 }

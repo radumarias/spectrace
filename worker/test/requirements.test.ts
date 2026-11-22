@@ -189,3 +189,96 @@ describe("parseDraft", () => {
     expect(parseDraft('{"flows":[]}')).toBeNull();
   });
 });
+
+describe("POST /coordinator on a requirements set: revise through the coordinator, ids stay", () => {
+  async function withSet(s: Awaited<ReturnType<typeof seed>>) {
+    answers = [draft(GOOD)];
+    const set = (await (await call(s.base, s.cookie, { method: "POST", json: { boardId: s.boardId } })).json()) as Set;
+    prompts.length = 0;
+    return set;
+  }
+  type Out = {
+    messages: { id: string; requirements: { setId: string; changes: string[]; skipped: string[]; undone: boolean } | null }[];
+    requirementSet: Set | null;
+  };
+  const ask = async (s: Awaited<ReturnType<typeof seed>>, setId: string, reply: unknown) => {
+    answers = [JSON.stringify(reply)];
+    const res = await call(`/api/projects/${s.projectId}/coordinator`, s.cookie, { method: "POST", json: { text: "change it", screen: { route: "req", setId } } });
+    expect(res.status).toBe(200);
+    return (await res.json()) as Out;
+  };
+
+  it("edits by id, never reuses a retired tag or step id, and undo keeps the ids issued", async () => {
+    const s = await seed();
+    const set = await withSet(s);
+    const first = await ask(s, set.id, {
+      reply: "Split the decline into its own step and dropped r2.",
+      requirements: [
+        { op: "edit", flow: "checkout", edit: { op: "setRequirement", node: "pay", tag: "r1", condition: "the user confirms payment", response: "charge the card exactly once" } },
+        { op: "edit", flow: "checkout", edit: { op: "removeRequirement", node: "pay", tag: "r2" } },
+        { op: "edit", flow: "checkout", edit: { op: "addRequirement", node: "pay", condition: "the bank takes over 10 seconds", response: "show a spinner" } },
+        { op: "edit", flow: "checkout", edit: { op: "addStep", node: "failed", label: "Declined", from: "pay", edgeLabel: "declined" } },
+        { op: "addView", of: "checkout.failed", kind: "mockup", title: "Declined screen", text: "### Declined\n\n- [Try again]" },
+        { op: "edit", flow: "nowhere", edit: { op: "removeStep", node: "x" } },
+      ],
+    });
+    expect(prompts[0]!.system).toContain('{"op":"addRequirement","node":"<node>"');
+    expect(prompts[0]!.prompt).toContain(`The requirements set "Checkout" (set id=${set.id}).`);
+    expect(prompts[0]!.prompt).toContain("--- [v1] mockup \"Pay screen\" of checkout.pay");
+    const edit = first.messages[1]!.requirements!;
+    expect(edit.changes).toEqual([
+      "Changed checkout.pay/r1",
+      "Removed checkout.pay/r2 (its id is retired)",
+      "Added checkout.pay/r3",
+      "Added step checkout.failed",
+      "Added the mockup Declined screen",
+    ]);
+    expect(edit.skipped).toEqual(["no flow nowhere"]);
+    const after = first.requirementSet!;
+    expect(after.flows[0]!.source).toContain("- WHEN the bank takes over 10 seconds THE SYSTEM SHALL show a spinner. {#r3}");
+    expect(after.flows[0]!.source).not.toContain("{#r2}");
+    expect(after.flows[0]!.source).toContain("## Cart {#checkout.cart}\n\n- WHEN the user opens the cart THE SYSTEM SHALL list every item with its price. {#r1}");
+    expect(after.ids).toEqual(["checkout", "checkout.cart", "checkout.cart/r1", "checkout.pay", "checkout.pay/r1", "checkout.pay/r2", "checkout.pay/r3", "checkout.failed"]);
+    expect(after.views.map((v) => v.id)).toEqual(["v1", "v2", "v3", "v4"]);
+
+    // r2 stays retired: the next requirement on pay is r4.
+    const second = await ask(s, set.id, {
+      reply: "Added.",
+      requirements: [
+        { op: "edit", flow: "checkout", edit: { op: "removeRequirement", node: "pay", tag: "r3" } },
+        { op: "edit", flow: "checkout", edit: { op: "addRequirement", node: "pay", condition: "the card is expired", response: "ask for another card" } },
+      ],
+    });
+    expect(second.messages[1]!.requirements!.changes).toEqual(["Removed checkout.pay/r3 (its id is retired)", "Added checkout.pay/r4"]);
+    expect(second.requirementSet!.flows[0]!.source).toContain("ask for another card. {#r4}");
+
+    // Undo the second change: the content goes back, r4 stays issued.
+    const undo = await call(`/api/projects/${s.projectId}/coordinator/${second.messages[1]!.id}/undo`, s.cookie, { method: "POST" });
+    expect(undo.status).toBe(200);
+    const u = (await undo.json()) as Out;
+    expect(u.messages[0]!.requirements!.undone).toBe(true);
+    expect(u.requirementSet!.flows[0]!.source).toContain("{#r3}");
+    expect(u.requirementSet!.ids).toContain("checkout.pay/r4");
+    // The first change can no longer be undone: the set changed after it.
+    expect((await call(`/api/projects/${s.projectId}/coordinator/${first.messages[1]!.id}/undo`, s.cookie, { method: "POST" })).status).toBe(409);
+
+    // A retired step id cannot come back.
+    const third = await ask(s, set.id, {
+      reply: "Ok.",
+      requirements: [
+        { op: "edit", flow: "checkout", edit: { op: "removeStep", node: "failed" } },
+        { op: "edit", flow: "checkout", edit: { op: "addStep", node: "failed", label: "Declined", from: "pay", edgeLabel: "declined" } },
+      ],
+    });
+    expect(third.messages[1]!.requirements!.skipped).toEqual(["step id checkout.failed was used before; pick a new one"]);
+  });
+
+  it("changes nothing off a set page", async () => {
+    const s = await seed();
+    await withSet(s);
+    answers = [JSON.stringify({ reply: "ok", requirements: [{ op: "title", text: "X" }] })];
+    const out = (await (await call(`/api/projects/${s.projectId}/coordinator`, s.cookie, { method: "POST", json: { text: "x", screen: { route: "home" } } })).json()) as Out;
+    expect(out.requirementSet).toBeNull();
+    expect(out.messages[1]!.requirements).toBeNull();
+  });
+});

@@ -15,3 +15,4 @@
 
 .drew{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px}
 .drew .tool{flex:1 1 100%}
+.tool.skip b{color:var(--bad)}

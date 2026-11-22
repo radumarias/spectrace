@@ -6,7 +6,10 @@ import { requireUser } from "../auth";
 import { applyOps, type BoardBlock, type BoardContent } from "../board-ops";
 import { ACTION_KINDS, type Action, answer, type ApiGet, type Turn } from "../coordinator";
 import { AppError, ErrorBody } from "../error";
+import { applyReqOps, type SetContent } from "../requirement-ops";
+import type { DraftFlow, DraftView } from "../requirements-types";
 import { requireProjectOwner } from "./projects";
+import { RequirementSet, SET_COLS, type SetRow, toSet } from "./requirements";
 
 const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
 const MessageParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "messageId", in: "path" } });
@@ -38,6 +41,15 @@ const Message = z
       })
       .nullable()
       .openapi({ description: "The coordinator's changes to the whiteboard the user was on, already applied; null when it changed nothing." }),
+    requirements: z
+      .object({
+        setId: z.string(),
+        changes: z.array(z.string()).openapi({ description: "What changed, by id, such as `Added checkout.pay/r3`." }),
+        skipped: z.array(z.string()).openapi({ description: "Changes the coordinator asked for that could not be made, and why." }),
+        undone: z.boolean(),
+      })
+      .nullable()
+      .openapi({ description: "The coordinator's changes to the requirements set the user was on, already applied; null when it changed nothing." }),
     createdAt: z.string(),
   })
   .openapi("CoordinatorMessage");
@@ -58,6 +70,7 @@ const Screen = z
     pullId: z.string().max(64).optional(),
     specId: z.string().max(64).optional(),
     boardId: z.string().max(64).optional(),
+    setId: z.string().max(64).optional(),
   })
   .openapi("CoordinatorScreen", { description: "What the user is looking at." });
 
@@ -86,8 +99,8 @@ const sendRoute = createRoute({
   request: { params: z.object({ projectId: ProjectParam }), body: { required: true, content: json(z.object({ text: z.string().trim().min(1).max(2000), screen: Screen })) } },
   responses: {
     200: {
-      description: "Your message and the coordinator's reply; `board` is the whiteboard after the coordinator changed it, when it did",
-      content: json(z.object({ messages: z.array(Message), board: BoardOut.nullable() })),
+      description: "Your message and the coordinator's reply; `board` is the whiteboard and `requirementSet` the requirements set after the coordinator changed them, when it did",
+      content: json(z.object({ messages: z.array(Message), board: BoardOut.nullable(), requirementSet: RequirementSet.nullable() })),
     },
     400: errors[400],
     401: errors[401],
@@ -117,11 +130,14 @@ const runRoute = createRoute({
 const undoRoute = createRoute({
   method: "post",
   path: "/api/projects/{projectId}/coordinator/{messageId}/undo",
-  summary: "Undo the coordinator's change to the whiteboard",
-  description: "Puts the board back as it was before this reply changed it. Only while nobody changed the board since; otherwise 409.",
+  summary: "Undo the coordinator's change to the whiteboard or the requirements set",
+  description: "Puts the board or the set back as it was before this reply changed it. Only while nobody changed it since; otherwise 409.",
   request: { params: z.object({ projectId: ProjectParam, messageId: MessageParam }) },
   responses: {
-    200: { description: "The message, now undone, and the board as it was", content: json(z.object({ messages: z.array(Message), board: BoardOut })) },
+    200: {
+      description: "The message, now undone, and the board or set as it was",
+      content: json(z.object({ messages: z.array(Message), board: BoardOut.nullable(), requirementSet: RequirementSet.nullable() })),
+    },
     401: errors[401],
     404: errors[404],
     409: { description: "Already undone, or the board changed since", content: json(ErrorBody) },
@@ -144,7 +160,17 @@ interface Row {
   actions: string;
   ran: string;
   board: string | null;
+  req_edit: string | null;
   created_at: string;
+}
+
+interface ReqEdit {
+  setId: string;
+  changes: string[];
+  skipped: string[];
+  before: SetContent;
+  at: string;
+  undone: boolean;
 }
 
 interface BoardEdit {
@@ -156,7 +182,7 @@ interface BoardEdit {
 }
 type BoardRow = { id: string; title: string; blocks: string; created_at: string; updated_at: string };
 const toBoard = (r: BoardRow) => ({ id: r.id, title: r.title, blocks: parse<BoardBlock[]>(r.blocks, []), createdAt: r.created_at, updatedAt: r.updated_at });
-const COLS = "id, role, text, tools, actions, ran, board, created_at";
+const COLS = "id, role, text, tools, actions, ran, board, req_edit, created_at";
 
 const parse = <T>(s: string, fallback: T): T => {
   try {
@@ -174,6 +200,11 @@ const toMessage = (r: Row): z.infer<typeof Message> => ({
   actions: parse<Action[]>(r.actions, []),
   ran: parse<number[]>(r.ran, []),
   board: r.board ? (({ boardId, changes, undone }: BoardEdit) => ({ boardId, changes, undone }))(parse<BoardEdit>(r.board, { boardId: "", changes: [], before: { title: "", blocks: [] }, at: "", undone: true })) : null,
+  requirements: r.req_edit
+    ? (({ setId, changes, skipped, undone }: ReqEdit) => ({ setId, changes, skipped, undone }))(
+        parse<ReqEdit>(r.req_edit, { setId: "", changes: [], skipped: [], before: { title: "", flows: [], views: [], ids: [] }, at: "", undone: true }),
+      )
+    : null,
   createdAt: r.created_at,
 });
 
@@ -183,10 +214,10 @@ async function insert(
   c: Ctx,
   projectId: string,
   userId: string,
-  m: { role: Row["role"]; text: string; screen?: unknown; tools?: string[]; actions?: Action[]; backend?: string; board?: BoardEdit },
+  m: { role: Row["role"]; text: string; screen?: unknown; tools?: string[]; actions?: Action[]; backend?: string; board?: BoardEdit; req?: ReqEdit },
 ): Promise<Row> {
   const row = await c.env.DB.prepare(
-    `INSERT INTO coordinator_messages (id, project_id, user_id, role, text, screen, tools, actions, backend, board) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+    `INSERT INTO coordinator_messages (id, project_id, user_id, role, text, screen, tools, actions, backend, board, req_edit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
      RETURNING ${COLS}`,
   )
     .bind(
@@ -200,6 +231,7 @@ async function insert(
       JSON.stringify(m.actions ?? []),
       m.backend ?? null,
       m.board ? JSON.stringify(m.board) : null,
+      m.req ? JSON.stringify(m.req) : null,
     )
     .first<Row>();
   if (!row) throw new AppError("internal", "coordinator message was not stored");
@@ -207,6 +239,13 @@ async function insert(
 }
 
 type App = OpenAPIHono<AppEnv>;
+
+/** The set's issued ids now: undo puts the content back but keeps every id ever issued. */
+async function idsAfterUndo(c: Ctx, e: ReqEdit): Promise<string[]> {
+  const r = await c.env.DB.prepare("SELECT ids FROM requirement_sets WHERE id = ?1").bind(e.setId).first<{ ids: string }>();
+  const now = parse<string[]>(r?.ids ?? "[]", []);
+  return [...e.before.ids, ...now.filter((i) => !e.before.ids.includes(i))];
+}
 
 /** Calls this app's own API as the signed-in user (same cookie), without leaving the Worker. */
 function selfCall(app: App, c: Ctx) {
@@ -260,7 +299,11 @@ export function registerCoordinator(app: App) {
     const readBoard = (id: string) => c.env.DB.prepare("SELECT id, title, blocks, created_at, updated_at FROM boards WHERE id = ?1 AND project_id = ?2").bind(id, projectId).first<BoardRow>();
     const seen = screen.boardId ? await readBoard(screen.boardId) : null;
     const board = seen ? { id: seen.id, title: seen.title, blocks: parse<BoardBlock[]>(seen.blocks, []) } : undefined;
-    const out = await answer(c.env, user, { projectId, projectName: project?.name ?? "", history, question: text, screen, board, get });
+    const readSet = (id: string) => c.env.DB.prepare(`SELECT ${SET_COLS} FROM requirement_sets WHERE id = ?1 AND project_id = ?2`).bind(id, projectId).first<SetRow>();
+    const contentOf = (r: SetRow): SetContent => ({ title: r.title, flows: parse<DraftFlow[]>(r.flows, []), views: parse<DraftView[]>(r.views, []), ids: parse<string[]>(r.ids, []) });
+    const setSeen = screen.setId ? await readSet(screen.setId) : null;
+    const set = setSeen ? { id: setSeen.id, ...contentOf(setSeen) } : undefined;
+    const out = await answer(c.env, user, { projectId, projectName: project?.name ?? "", history, question: text, screen, board, set, get });
 
     // The coordinator's pen: applied to the board as it is now (the user may
     // have kept drawing while it thought), with the board before kept for undo.
@@ -280,8 +323,25 @@ export function registerCoordinator(app: App) {
         if (after) edit = { boardId: after.id, changes: next.changes, before, at: after.updated_at, undone: false };
       }
     }
-    const reply = await insert(c, projectId, user.id, { role: "coordinator", text: out.text, tools: out.tools, actions: out.actions, backend: out.backend, board: edit });
-    return c.json({ messages: [toMessage(mine), toMessage(reply)], board: after ? toBoard(after) : null }, 200);
+    // The same for the requirements set: ids stay, the set before is kept for undo.
+    let req: ReqEdit | undefined;
+    let setAfter: SetRow | null = null;
+    const setNow = set && out.requirements.length ? await readSet(set.id) : null;
+    if (setNow) {
+      const before = contentOf(setNow);
+      const next = await applyReqOps(before, out.requirements);
+      if (next.changes.length) {
+        setAfter = await c.env.DB.prepare(
+          `UPDATE requirement_sets SET title = ?3, flows = ?4, views = ?5, ids = ?6, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE id = ?1 AND project_id = ?2 RETURNING ${SET_COLS}`,
+        )
+          .bind(setNow.id, projectId, next.title, JSON.stringify(next.flows), JSON.stringify(next.views), JSON.stringify(next.ids))
+          .first<SetRow>();
+      }
+      if (setAfter || next.skipped.length) req = { setId: setNow.id, changes: next.changes, skipped: next.skipped, before, at: setAfter?.updated_at ?? setNow.updated_at, undone: !setAfter };
+    }
+    const reply = await insert(c, projectId, user.id, { role: "coordinator", text: out.text, tools: out.tools, actions: out.actions, backend: out.backend, board: edit, req });
+    return c.json({ messages: [toMessage(mine), toMessage(reply)], board: after ? toBoard(after) : null, requirementSet: setAfter ? await toSet(setAfter) : null }, 200);
   });
 
   app.openapi(runRoute, async (c) => {
@@ -343,8 +403,28 @@ export function registerCoordinator(app: App) {
     const { projectId, messageId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, user.id, projectId);
     const row = await c.env.DB.prepare(`SELECT ${COLS} FROM coordinator_messages WHERE id = ?1 AND project_id = ?2 AND user_id = ?3`).bind(messageId, projectId, user.id).first<Row>();
+    const reqEdit = row?.req_edit ? parse<ReqEdit | null>(row.req_edit, null) : null;
+    if (row && reqEdit && reqEdit.changes.length) {
+      if (reqEdit.undone) throw new AppError("conflict", "conflict: already undone");
+      const b = reqEdit.before;
+      const back = await c.env.DB.prepare(
+        `UPDATE requirement_sets SET title = ?3, flows = ?4, views = ?5, ids = ?6, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ?1 AND project_id = ?2 AND updated_at = ?7 RETURNING ${SET_COLS}`,
+      )
+        // Ids issued by the change stay issued: undo never makes an id reusable.
+        .bind(reqEdit.setId, projectId, b.title, JSON.stringify(b.flows), JSON.stringify(b.views), JSON.stringify(await idsAfterUndo(c, reqEdit)), reqEdit.at)
+        .first<SetRow>();
+      if (!back) {
+        const exists = await c.env.DB.prepare("SELECT 1 AS x FROM requirement_sets WHERE id = ?1 AND project_id = ?2").bind(reqEdit.setId, projectId).first();
+        if (!exists) throw AppError.notFound(`requirement set ${reqEdit.setId}`);
+        throw new AppError("conflict", "conflict: the requirements changed after this; ask for the change you want instead");
+      }
+      const undone = { ...reqEdit, undone: true };
+      await c.env.DB.prepare("UPDATE coordinator_messages SET req_edit = ?1 WHERE id = ?2").bind(JSON.stringify(undone), messageId).run();
+      return c.json({ messages: [toMessage({ ...row, req_edit: JSON.stringify(undone) })], board: null, requirementSet: await toSet(back) }, 200);
+    }
     const edit = row?.board ? parse<BoardEdit | null>(row.board, null) : null;
-    if (!row || !edit) throw AppError.notFound(`board change on message ${messageId}`);
+    if (!row || !edit) throw AppError.notFound(`change on message ${messageId}`);
     if (edit.undone) throw new AppError("conflict", "conflict: already undone");
     const restored = await c.env.DB.prepare(
       `UPDATE boards SET title = ?3, blocks = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -359,7 +439,7 @@ export function registerCoordinator(app: App) {
     }
     const undone = { ...edit, undone: true };
     await c.env.DB.prepare("UPDATE coordinator_messages SET board = ?1 WHERE id = ?2").bind(JSON.stringify(undone), messageId).run();
-    return c.json({ messages: [toMessage({ ...row, board: JSON.stringify(undone) })], board: toBoard(restored) }, 200);
+    return c.json({ messages: [toMessage({ ...row, board: JSON.stringify(undone) })], board: toBoard(restored), requirementSet: null }, 200);
   });
 
   app.openapi(clearRoute, async (c) => {
