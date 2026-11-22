@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { type CoordinatorScreen, useAskCoordinator, useClearCoordinator, useCoordinator, useRunAction, useUndoBoard } from "../api/coordinator";
+import { useStudioThinking } from "../api/live";
 import { usePull } from "../api/pulls";
-import type { Project } from "../api/queries";
+import { type Project, useMe } from "../api/queries";
 import { Button, Pill } from "../ui/parts";
 import { useToast } from "../ui/Toast";
 import { TITLES } from "./nav";
+import { useDictation, useReadAloud } from "./voice";
 
 const GREETING = "Hi. I can see what you are looking at, and I can act on anything you can click. Ask me what needs you, or tell me what to change.";
 const SET_GREETING = "Tell me what to change in these requirements: a step, a requirement, a mockup. I change only that part, and every id that already exists stays the same.";
@@ -55,6 +57,15 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
   const [pending, setPending] = useState<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const me = useMe().data;
+  const remote = useStudioThinking(project?.id);
+  // The coordinator is at work on a question asked here, or on another of your devices.
+  const thinking = askIt.isPending ? screen : remote && (!me || remote.userId === me.id) ? remote : null;
+  const aloud = useReadAloud();
+  const voice = useDictation((heard, final) => {
+    if (final) send(heard);
+    else setText(heard);
+  });
 
   useEffect(() => {
     if (open) window.setTimeout(() => input.current?.focus(), 30);
@@ -68,7 +79,14 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
     if (!t || !project || askIt.isPending) return;
     setText("");
     setPending(t);
-    askIt.mutate({ text: t, screen }, { onSettled: () => setPending(null), onError: (e) => toast(e.message) });
+    askIt.mutate(
+      { text: t, screen },
+      {
+        onSettled: () => setPending(null),
+        onError: (e) => toast(e.message),
+        onSuccess: (out) => aloud.speak(out.messages.filter((m) => m.role === "coordinator").at(-1)?.text ?? ""),
+      },
+    );
   };
 
   const act = (messageId: string, index: number, a: { kind: string; path?: string }) => {
@@ -87,6 +105,11 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
       <div className="ask-h">
         <b style={{ font: "600 16px var(--f-display)" }}>Coordinator</b>
         <span className="btns" style={{ gap: 4 }}>
+          {aloud.supported && (
+            <Button variant="ghost" small aria-pressed={aloud.on} className={aloud.on ? "on" : undefined} onClick={aloud.toggle} title="Read the coordinator's replies aloud">
+              Read aloud
+            </Button>
+          )}
           {msgs.length > 0 && (
             <Button variant="ghost" small onClick={() => clear.mutate()} disabled={clear.isPending || askIt.isPending}>
               New chat
@@ -173,7 +196,11 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
             {pending}
           </div>
         )}
-        {askIt.isPending && <span className="mono sub" style={{ fontSize: 12 }}>{screen.boardId ? "coordinator is thinking and sketching…" : screen.setId ? "coordinator is revising…" : "coordinator is working…"}</span>}
+        {thinking && (
+          <span className="mono sub" role="status" style={{ fontSize: 12 }}>
+            {thinking.boardId ? "coordinator is thinking and sketching…" : thinking.setId ? "coordinator is revising…" : "coordinator is working…"}
+          </span>
+        )}
       </div>
       {project && (
         <div className="sugg">
@@ -192,11 +219,41 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
         }}
       >
         <label className="sr" htmlFor="ask-input">Message the coordinator</label>
-        <input id="ask-input" ref={input} autoComplete="off" placeholder="Ask, or say what to change…" value={text} onChange={(e) => setText(e.target.value)} disabled={!project} />
+        <input
+          id="ask-input"
+          ref={input}
+          autoComplete="off"
+          placeholder={voice.listening ? "Listening…" : "Ask, or say what to change…"}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          disabled={!project}
+        />
+        {voice.supported && (
+          <Button
+            className={voice.listening ? "mic on" : "mic"}
+            aria-pressed={voice.listening}
+            aria-label={voice.listening ? "Stop listening" : "Speak"}
+            title={voice.listening ? "Stop listening" : "Speak instead of typing"}
+            disabled={!project || askIt.isPending}
+            onClick={voice.listening ? voice.stop : voice.start}
+          >
+            <MicIcon />
+          </Button>
+        )}
         <Button variant="primary" type="submit" disabled={!project || askIt.isPending || !text.trim()}>
           Send
         </Button>
       </form>
+      {voice.error && <p className="err" role="alert" style={{ margin: "0 16px 12px", fontSize: 12.5 }}>{voice.error}</p>}
     </aside>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+    </svg>
   );
 }

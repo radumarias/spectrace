@@ -7,6 +7,7 @@ import { applyOps, type BoardBlock, type BoardContent } from "../board-ops";
 import { ACTION_KINDS, type Action, answer, type ApiGet, type Turn } from "../coordinator";
 import { AppError, ErrorBody } from "../error";
 import { applyReqOps, type SetContent } from "../requirement-ops";
+import { studio } from "../studio-live";
 import type { DraftFlow, DraftView } from "../requirements-types";
 import { requireProjectOwner } from "./projects";
 import { RequirementSet, SET_COLS, type SetRow, toSet } from "./requirements";
@@ -303,7 +304,15 @@ export function registerCoordinator(app: App) {
     const contentOf = (r: SetRow): SetContent => ({ title: r.title, flows: parse<DraftFlow[]>(r.flows, []), views: parse<DraftView[]>(r.views, []), ids: parse<string[]>(r.ids, []) });
     const setSeen = screen.setId ? await readSet(screen.setId) : null;
     const set = setSeen ? { id: setSeen.id, ...contentOf(setSeen) } : undefined;
-    const out = await answer(c.env, user, { projectId, projectName: project?.name ?? "", history, question: text, screen, board, set, get });
+    // Every device with the project open sees the question go in and the coordinator at work.
+    await studio(c.env, projectId, "studio.thinking", { userId: user.id, boardId: screen.boardId ?? null, setId: screen.setId ?? null });
+    let out: Awaited<ReturnType<typeof answer>>;
+    try {
+      out = await answer(c.env, user, { projectId, projectName: project?.name ?? "", history, question: text, screen, board, set, get });
+    } catch (error) {
+      await studio(c.env, projectId, "studio.messages", { userId: user.id });
+      throw error;
+    }
 
     // The coordinator's pen: applied to the board as it is now (the user may
     // have kept drawing while it thought), with the board before kept for undo.
@@ -341,6 +350,9 @@ export function registerCoordinator(app: App) {
       if (setAfter || next.skipped.length) req = { setId: setNow.id, changes: next.changes, skipped: next.skipped, before, at: setAfter?.updated_at ?? setNow.updated_at, undone: !setAfter };
     }
     const reply = await insert(c, projectId, user.id, { role: "coordinator", text: out.text, tools: out.tools, actions: out.actions, backend: out.backend, board: edit, req });
+    await studio(c.env, projectId, "studio.messages", { userId: user.id });
+    if (after) await studio(c.env, projectId, "studio.board", { boardId: after.id, updatedAt: after.updated_at });
+    if (setAfter) await studio(c.env, projectId, "studio.requirements", { setId: setAfter.id, updatedAt: setAfter.updated_at });
     return c.json({ messages: [toMessage(mine), toMessage(reply)], board: after ? toBoard(after) : null, requirementSet: setAfter ? await toSet(setAfter) : null }, 200);
   });
 
@@ -395,6 +407,7 @@ export function registerCoordinator(app: App) {
           actions: [{ kind: "open", label: "Open the requirements", path: `/req/${drafted.id}` }],
         })
       : await insert(c, projectId, user.id, { role: "coordinator", text: ok ? done : failed });
+    await studio(c.env, projectId, "studio.messages", { userId: user.id });
     return c.json({ ok, messages: [msg, toMessage(note)] }, 200);
   });
 
@@ -421,6 +434,8 @@ export function registerCoordinator(app: App) {
       }
       const undone = { ...reqEdit, undone: true };
       await c.env.DB.prepare("UPDATE coordinator_messages SET req_edit = ?1 WHERE id = ?2").bind(JSON.stringify(undone), messageId).run();
+      await studio(c.env, projectId, "studio.messages", { userId: user.id });
+      await studio(c.env, projectId, "studio.requirements", { setId: back.id, updatedAt: back.updated_at });
       return c.json({ messages: [toMessage({ ...row, req_edit: JSON.stringify(undone) })], board: null, requirementSet: await toSet(back) }, 200);
     }
     const edit = row?.board ? parse<BoardEdit | null>(row.board, null) : null;
@@ -439,6 +454,8 @@ export function registerCoordinator(app: App) {
     }
     const undone = { ...edit, undone: true };
     await c.env.DB.prepare("UPDATE coordinator_messages SET board = ?1 WHERE id = ?2").bind(JSON.stringify(undone), messageId).run();
+    await studio(c.env, projectId, "studio.messages", { userId: user.id });
+    await studio(c.env, projectId, "studio.board", { boardId: restored.id, updatedAt: restored.updated_at });
     return c.json({ messages: [toMessage({ ...row, board: JSON.stringify(undone) })], board: toBoard(restored), requirementSet: null }, 200);
   });
 

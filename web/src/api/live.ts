@@ -1,7 +1,9 @@
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { boardKeys } from "./boards";
 import { pullKeys } from "./pulls";
 import { keys, type Project } from "./queries";
+import { reqKeys } from "./requirements";
 
 /** One job event, as the Worker sends it over the project's WebSocket. */
 export type JobEvent = { id: number; projectId: string; jobId: string; event: string; data: Record<string, unknown>; createdAt: string };
@@ -44,6 +46,7 @@ function useProjectSocket(id: string | undefined, enabled: boolean, onEvent: (ev
         } catch {
           return;
         }
+        if (ev.id < 0) return onEvent(ev); // a live studio event: never stored, so never replayed or repeated
         if (last !== undefined && ev.id <= last) return; // seen around a reconnect
         last = ev.id;
         onEvent(ev);
@@ -73,6 +76,52 @@ function refreshPulls(qc: QueryClient, projectId: string) {
   for (const k of ["pull", "pull-diff", "pull-reviews", "agent-review"]) void qc.invalidateQueries({ queryKey: [k, projectId] });
 }
 
+/** Someone (you, on any device) asked the coordinator something and it is still working on it. */
+export type StudioThinking = { userId: string; boardId: string | null; setId: string | null; at: number };
+export const studioKey = (projectId: string) => ["studio-thinking", projectId] as const;
+/** A question older than this is taken as lost (its end was never heard). */
+export const THINKING_MS = 5 * 60_000;
+
+/**
+ * Live studio events: the coordinator thinking, new messages, and a board or
+ * requirements set that changed (by the coordinator, an undo, or a hand edit
+ * on another device). A page already showing that version reads nothing.
+ */
+function onStudio(qc: QueryClient, projectId: string, ev: JobEvent) {
+  const d = ev.data;
+  const str = (v: unknown) => (typeof v === "string" ? v : null);
+  if (ev.event === "studio.thinking") {
+    const at = Date.now();
+    qc.setQueryData<StudioThinking>(studioKey(projectId), { userId: str(d.userId) ?? "", boardId: str(d.boardId), setId: str(d.setId), at });
+    window.setTimeout(() => {
+      if (qc.getQueryData<StudioThinking | null>(studioKey(projectId))?.at === at) qc.setQueryData(studioKey(projectId), null);
+    }, THINKING_MS);
+  } else if (ev.event === "studio.messages") {
+    qc.setQueryData(studioKey(projectId), null);
+    void qc.invalidateQueries({ queryKey: ["coordinator", projectId] });
+  } else if (ev.event === "studio.board" && str(d.boardId)) {
+    const k = boardKeys.one(projectId, str(d.boardId)!);
+    if (qc.getQueryData<{ updatedAt: string }>(k)?.updatedAt !== d.updatedAt) void qc.invalidateQueries({ queryKey: k, exact: true });
+    void qc.invalidateQueries({ queryKey: boardKeys.all(projectId), exact: true });
+  } else if (ev.event === "studio.requirements" && str(d.setId)) {
+    const k = reqKeys.one(projectId, str(d.setId)!);
+    if (qc.getQueryData<{ updatedAt: string }>(k)?.updatedAt !== d.updatedAt) void qc.invalidateQueries({ queryKey: k, exact: true });
+    void qc.invalidateQueries({ queryKey: reqKeys.all(projectId), exact: true });
+  }
+}
+
+/** The question the coordinator is working on right now, asked from any of your devices; null when it is free. */
+export function useStudioThinking(projectId: string | undefined): StudioThinking | null {
+  const { data } = useQuery({
+    queryKey: studioKey(projectId ?? ""),
+    queryFn: (): StudioThinking | null => null,
+    enabled: false,
+    initialData: null,
+    staleTime: Infinity,
+  });
+  return data ?? null;
+}
+
 /**
  * While a project is being indexed, listen to its live events and refetch the
  * projects when something changes, so the progress banner and the project card
@@ -97,7 +146,8 @@ export function useProjectLive(project: Project | undefined) {
     true,
     (ev) => {
       if (!id) return;
-      if (ev.event === "pr.updated" || ev.event === "repo.pushed") refreshPulls(qc, id);
+      if (ev.event.startsWith("studio.")) onStudio(qc, id, ev);
+      else if (ev.event === "pr.updated" || ev.event === "repo.pushed") refreshPulls(qc, id);
       else if (ev.event === "progress" && typeof ev.data.review === "string") void qc.invalidateQueries({ queryKey: ["agent-review", id] }); // a review moved to its next stage
       else {
         refreshProjects(qc);
@@ -112,6 +162,9 @@ export function useProjectLive(project: Project | undefined) {
       if (!id) return;
       refreshProjects(qc);
       refreshPulls(qc, id);
+      // Studio events are not replayed: read what may have changed while away.
+      qc.setQueryData(studioKey(id), null);
+      for (const k of [["coordinator", id], boardKeys.all(id), reqKeys.all(id)]) void qc.invalidateQueries({ queryKey: k });
     },
   );
 }

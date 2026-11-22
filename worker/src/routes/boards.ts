@@ -7,6 +7,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { requireUser } from "../auth";
 import type { AppEnv } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { studio } from "../studio-live";
 import { requireProjectOwner } from "./projects";
 
 const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
@@ -122,6 +123,8 @@ export function registerBoards(app: OpenAPIHono<AppEnv>) {
       .bind(boardId, projectId, title, JSON.stringify(blocks))
       .first<Row>();
     if (!row) throw AppError.notFound(`board ${boardId}`);
+    // Other devices with this board open take the new version.
+    await studio(c.env, projectId, "studio.board", { boardId: row.id, updatedAt: row.updated_at });
     return c.json(toBoard(row), 200);
   });
 
