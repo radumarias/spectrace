@@ -105,3 +105,6 @@ details.flash{outline:2px solid var(--accent);outline-offset:4px}
 .rq-bar{display:flex;gap:5px;padding:7px 10px;border-bottom:1px solid var(--line);background:var(--sunk)}
 .rq-bar i{width:8px;height:8px;border-radius:50%;background:var(--line)}
 .rq-source{margin:8px 0 0;overflow-x:auto;font:12.5px/1.5 var(--f-mono);white-space:pre}
+.rq-snippet{display:flex;flex-direction:column;gap:6px;align-items:flex-start;min-width:0;width:100%}
+.rq-snippet pre{margin:0;max-width:100%;overflow-x:auto;background:var(--sunk);border-radius:8px;padding:8px 10px;font:12px/1.5 var(--f-mono)}
+.rq-select{border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:8px;padding:6px 10px;min-height:32px;font:inherit;max-width:100%}

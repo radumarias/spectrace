@@ -169,3 +169,49 @@ test("the coordinator revises the requirements by id, and Undo takes it back", a
   await expect(step.getByText("checkout.pay/r3", { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+// Requirements studio, phase 4: the set goes to the repo as one pull request with the same ids,
+// and Code + tests shows the anchors to add and, once indexed, which ids are covered.
+test("the set opens a pull request, and Code + tests shows anchors and what is covered", async ({ page }) => {
+  let opened: unknown = null;
+  const SUMMARY = {
+    id: "sp1", repo: "acme/shop", path: "spec/checkout.md", root: "", area: "", flow: "checkout", title: "Checkout",
+    steps: 2, requirements: 3, tested: 1, errors: 0, edges: [{ from: "cart", label: "checkout", to: "pay" }], indexedAt: "2026-11-22T14:00:00Z",
+  };
+  const anchor = (target: string, cls: "code" | "test", path: string, line: number) => ({ path, line, language: "rust", kind: "spec", class: cls, target, note: null, excerpt: "fn x() {}" });
+  const DETAIL = {
+    ...SUMMARY, source: SOURCE, sha: "abc", defaultBranch: "main", model: MODEL, diagnostics: [], devpage: null,
+    anchors: [anchor("checkout.pay/r1", "test", "tests/pay.rs", 12), anchor("checkout.pay", "code", "src/pay.rs", 3)],
+  };
+  await mockApi(page, {
+    "/api/me": USER,
+    "/api/projects": [PROJECT],
+    "/api/projects/p1/pulls": { pulls: [], counts: { needs: 0, open: 0, merged: 0 } },
+    "/api/projects/p1/coordinator": { messages: [] },
+    "/api/projects/p1/requirements": [],
+    "/api/projects/p1/requirements/s1": SET,
+    "/api/projects/p1/requirements/s1/pull": (r: Request) => {
+      opened = r.postDataJSON();
+      return { status: 201, body: { ...SET, pull: { repo: "acme/shop", number: 9, url: "https://github.com/acme/shop/pull/9" } } };
+    },
+    "/api/projects/p1/specs": [SUMMARY],
+    "/api/projects/p1/specs/sp1": DETAIL,
+  });
+  await page.addInitScript(() => localStorage.setItem("spectrace-proj", "p1"));
+  const errors = trackErrors(page);
+  await page.goto("/req/s1");
+  await page.getByRole("button", { name: "Open a pull request in acme/shop" }).click();
+  await expect(page.getByRole("link", { name: "pull request #9" })).toHaveAttribute("href", "https://github.com/acme/shop/pull/9");
+  expect(opened).toEqual({ repoId: "r1" });
+
+  await page.getByRole("tab", { name: "Code + tests" }).click();
+  const code = page.getByRole("region", { name: "Code and tests for Checkout" });
+  await expect(code.getByRole("link", { name: "In acme/shop: 1/3 tested" })).toBeVisible();
+  await expect(code.getByText("Tests: tests/pay.rs:12")).toBeVisible();
+  await expect(code.getByText("Code: src/pay.rs:3")).toBeVisible();
+  await expect(code.getByText('#[spec("checkout.pay/r2")]', { exact: false })).toBeVisible();
+  await expect(code.getByText("fn pay_r2_show_the_reason()", { exact: false })).toBeVisible();
+  await expect(code.getByText('#[spec("checkout.cart")]', { exact: false })).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});

@@ -148,7 +148,7 @@ const SpecChange = z
   })
   .openapi("SpecChange");
 
-const SpecChangeOpened = z
+export const SpecChangeOpened = z
   .object({
     number: z.number().int(),
     url: z.string().openapi({ example: "https://github.com/acme/shop/pull/7" }),
@@ -186,6 +186,32 @@ type GhAnswer = { status: number; json: Record<string, unknown> };
 const refuse = (what: string, res: GhAnswer) =>
   new AppError("conflict", `conflict: ${what}: ${typeof res.json.message === "string" ? res.json.message : `GitHub answered ${res.status}`}`);
 const encodePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+
+/** Commits new files on a new branch from the default branch and opens one pull request for them. Refuses (409) when a file already exists there. */
+export async function openFilesPull(
+  env: AppEnv["Bindings"],
+  projectId: string,
+  o: { repo: string; defaultBranch: string; branch: string; files: { path: string; source: string }[]; message: string; title: string; body: string },
+): Promise<z.infer<typeof SpecChangeOpened>> {
+  const { repo } = o;
+  for (const f of o.files) {
+    const there = await github(env, projectId, repo, "GET", `/repos/${repo}/contents/${encodePath(f.path)}?ref=${encodeURIComponent(o.defaultBranch)}`, undefined);
+    if (there.status === 200) throw new AppError("conflict", `conflict: ${f.path} already exists on ${o.defaultBranch}`);
+    if (there.status !== 404) throw refuse(`checking ${f.path}`, there);
+  }
+  const head = await github(env, projectId, repo, "GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(o.defaultBranch)}`, undefined);
+  const base = (head.json.object as { sha?: unknown } | undefined)?.sha;
+  if (head.status !== 200 || typeof base !== "string") throw refuse(`reading ${o.defaultBranch}`, head);
+  const ref = await github(env, projectId, repo, "POST", `/repos/${repo}/git/refs`, { ref: `refs/heads/${o.branch}`, sha: base });
+  if (ref.status !== 201) throw refuse(`creating ${o.branch}`, ref);
+  for (const f of o.files) {
+    const put = await github(env, projectId, repo, "PUT", `/repos/${repo}/contents/${encodePath(f.path)}`, { message: `${o.message}: ${f.path}`, content: base64(f.source), branch: o.branch });
+    if (put.status !== 200 && put.status !== 201) throw refuse(`committing ${f.path}`, put);
+  }
+  const pr = await github(env, projectId, repo, "POST", `/repos/${repo}/pulls`, { title: o.title, head: o.branch, base: o.defaultBranch, body: o.body });
+  if (pr.status !== 201 || typeof pr.json.number !== "number" || typeof pr.json.html_url !== "string") throw refuse("opening the pull request", pr);
+  return { number: pr.json.number, url: pr.json.html_url, branch: o.branch };
+}
 
 /** Commits `source` to `path` on a new branch from the default branch and opens a pull request for it. */
 async function openSpecPull(

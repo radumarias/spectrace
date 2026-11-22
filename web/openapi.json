@@ -1737,6 +1737,27 @@
             },
             "description": "Every id this set has issued, in order. An id is never reused."
           },
+          "pull": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "repo": {
+                "type": "string"
+              },
+              "number": {
+                "type": "integer"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "repo",
+              "number",
+              "url"
+            ],
+            "description": "The pull request that added the set's spec files to a repo; null until one is opened."
+          },
           "createdAt": {
             "type": "string"
           },
@@ -1751,6 +1772,7 @@
           "flows",
           "views",
           "ids",
+          "pull",
           "createdAt",
           "updatedAt"
         ]
@@ -4977,6 +4999,104 @@
           },
           "409": {
             "description": "Already undone, or the board changed since",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/requirements/{setId}/pull": {
+      "post": {
+        "summary": "Add the set's spec files to a repo: commit them on a new branch and open a pull request",
+        "description": "Each flow becomes `spec/<flow>.md` with the same ids, and its mockups, diagrams and notes `spec/<flow>.views.md`. The pull request lists every id as a checklist for anchoring code and tests with `#[spec(\"<id>\")]`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "setId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repoId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "repoId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The set, with its pull request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementSet"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A flow has errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project, set or repo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already opened, a file already exists, or GitHub refused",
             "content": {
               "application/json": {
                 "schema": {

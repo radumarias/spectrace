@@ -70,3 +70,19 @@ export function useDeleteRequirementSet(projectId: string) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: reqKeys.all(projectId) }),
   });
 }
+
+/** Add the set's spec files to a repo as a pull request. */
+export function useOpenRequirementsPull(projectId: string, setId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (repoId: string): Promise<RequirementSet> => {
+      const { data, error } = await api.POST("/api/projects/{projectId}/requirements/{setId}/pull", { params: { path: { projectId, setId } }, body: { repoId } });
+      if (!data) throw message(error, "Could not open the pull request.");
+      return data;
+    },
+    onSuccess: (set) => {
+      qc.setQueryData(reqKeys.one(projectId, set.id), set);
+      void qc.invalidateQueries({ queryKey: reqKeys.all(projectId), exact: true });
+    },
+  });
+}

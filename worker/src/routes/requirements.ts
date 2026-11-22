@@ -13,8 +13,9 @@ import {
   type DraftView,
   VIEW_KINDS,
 } from "../requirements-types";
+import { exportFiles, pullBody } from "../requirements-export";
 import { requireProjectOwner } from "./projects";
-import { Diagnostic, Model } from "./specs";
+import { Diagnostic, Model, openFilesPull } from "./specs";
 
 const ProjectParam = z
   .string()
@@ -86,6 +87,10 @@ export const RequirementSet = z
         description:
           "Every id this set has issued, in order. An id is never reused.",
       }),
+    pull: z
+      .object({ repo: z.string(), number: z.number().int(), url: z.string() })
+      .nullable()
+      .openapi({ description: "The pull request that added the set's spec files to a repo; null until one is opened." }),
     createdAt: z.string(),
     updatedAt: z.string(),
   })
@@ -100,6 +105,26 @@ const json = <T extends z.ZodType>(description: string, schema: T) => ({
   content: { "application/json": { schema } },
 });
 const both = z.object({ projectId: ProjectParam, setId: SetParam });
+
+const pullRoute = createRoute({
+  method: "post",
+  path: "/api/projects/{projectId}/requirements/{setId}/pull",
+  summary: "Add the set's spec files to a repo: commit them on a new branch and open a pull request",
+  description:
+    "Each flow becomes `spec/<flow>.md` with the same ids, and its mockups, diagrams and notes `spec/<flow>.views.md`. " +
+    "The pull request lists every id as a checklist for anchoring code and tests with `#[spec(\"<id>\")]`.",
+  request: {
+    params: z.object({ projectId: ProjectParam, setId: SetParam }),
+    body: { required: true, content: { "application/json": { schema: z.object({ repoId: z.string().min(1).max(64) }) } } },
+  },
+  responses: {
+    201: json("The set, with its pull request", RequirementSet),
+    400: err("A flow has errors"),
+    401: err("Not signed in"),
+    404: err("No such project, set or repo"),
+    409: err("Already opened, a file already exists, or GitHub refused"),
+  },
+});
 
 const listRoute = createRoute({
   method: "get",
@@ -172,10 +197,13 @@ export type SetRow = {
   flows: string;
   views: string;
   ids: string;
+  pull_repo: string | null;
+  pull_number: number | null;
+  pull_url: string | null;
   created_at: string;
   updated_at: string;
 };
-export const SET_COLS = "id, title, board_id, flows, views, ids, created_at, updated_at";
+export const SET_COLS = "id, title, board_id, flows, views, ids, pull_repo, pull_number, pull_url, created_at, updated_at";
 const parse = <T>(s: string, fallback: T): T => {
   try {
     return JSON.parse(s) as T;
@@ -198,12 +226,49 @@ export const toSet = async (
     }),
     views: parse<DraftView[]>(r.views, []),
     ids: parse<string[]>(r.ids, []),
+    pull: r.pull_repo && r.pull_number && r.pull_url ? { repo: r.pull_repo, number: r.pull_number, url: r.pull_url } : null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 };
 
 export function registerRequirements(app: OpenAPIHono<AppEnv>) {
+  app.openapi(pullRoute, async (c) => {
+    const user = await requireUser(c);
+    const { projectId, setId } = c.req.valid("param");
+    const { repoId } = c.req.valid("json");
+    await requireProjectOwner(c.env.DB, user.id, projectId);
+    const row = await c.env.DB.prepare(`SELECT ${SET_COLS} FROM requirement_sets WHERE id = ?1 AND project_id = ?2`).bind(setId, projectId).first<SetRow>();
+    if (!row) throw AppError.notFound(`requirement set ${setId}`);
+    if (row.pull_url) throw new AppError("conflict", `conflict: already opened as ${row.pull_repo}#${row.pull_number}`);
+    const repo = await c.env.DB.prepare("SELECT full_name, default_branch FROM project_repos WHERE id = ?1 AND project_id = ?2")
+      .bind(repoId, projectId)
+      .first<{ full_name: string; default_branch: string }>();
+    if (!repo) throw AppError.notFound(`repo ${repoId}`);
+    const { checkFlow } = await import("../requirements");
+    const flows = parse<DraftFlow[]>(row.flows, []).map(checkFlow);
+    if (!flows.length) throw AppError.badRequest("the set has no flows");
+    const broken = flows.filter((f) => !f.model);
+    if (broken.length) throw AppError.badRequest(`fix the errors in ${broken.map((f) => f.flow).join(", ")} first`);
+    const files = exportFiles(flows, parse<DraftView[]>(row.views, []));
+    const opened = await openFilesPull(c.env, projectId, {
+      repo: repo.full_name,
+      defaultBranch: repo.default_branch,
+      branch: `spectrace/req-${flows[0]!.flow}-${Date.now().toString(36)}`,
+      files,
+      message: `Add requirements ${row.title}`,
+      title: `Requirements: ${row.title}`,
+      body: pullBody({ title: row.title, login: user.login, flows, files, link: `${new URL(c.req.url).origin}/req/${row.id}` }),
+    });
+    const after = await c.env.DB.prepare(
+      `UPDATE requirement_sets SET pull_repo = ?3, pull_number = ?4, pull_url = ?5, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1 AND project_id = ?2 RETURNING ${SET_COLS}`,
+    )
+      .bind(row.id, projectId, repo.full_name, opened.number, opened.url)
+      .first<SetRow>();
+    if (!after) throw new AppError("internal", "requirement set vanished after opening its pull request");
+    return c.json(await toSet(after), 201);
+  });
+
   app.openapi(listRoute, async (c) => {
     const user = await requireUser(c);
     const { projectId } = c.req.valid("param");
