@@ -25,6 +25,7 @@ export const SUGG: Record<string, string[]> = {
   runners: ["What are the agents doing?"],
   talk: ["What needs me today?"],
   board: ["Sketch this flow with me", "Draw it as a sequence diagram", "What is missing?"],
+  req: ["Which requirements are not clear yet?"],
 };
 
 /** What the user is looking at, from the URL. */

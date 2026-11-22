@@ -12,6 +12,7 @@ import { SpecIndex, SpecPage } from "./pages/Spec";
 import { AppMap } from "./pages/AppMap";
 import { Runners } from "./pages/Runners";
 import { BoardIndex, BoardPage } from "./pages/Whiteboard";
+import { RequirementsIndex, RequirementsPage } from "./pages/Requirements";
 import { TITLES } from "./shell/nav";
 import { ToastProvider } from "./ui/Toast";
 
@@ -32,8 +33,10 @@ export function App() {
           <Route path="spec/:specId" element={<SpecPage />} />
           <Route path="board" element={<BoardIndex />} />
           <Route path="board/:boardId" element={<BoardPage />} />
+          <Route path="req" element={<RequirementsIndex />} />
+          <Route path="req/:setId" element={<RequirementsPage />} />
           <Route path="runners" element={<Runners />} />
-          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project", "prs", "spec", "map", "board", "runners"].includes(r)).map((r) => (
+          {Object.keys(TITLES).filter((r) => !["projects", "new-project", "home", "project", "prs", "spec", "map", "board", "req", "runners"].includes(r)).map((r) => (
             <Route key={r} path={r} element={<Page route={r} />} />
           ))}
           <Route path="*" element={<Navigate to="/projects" replace />} />

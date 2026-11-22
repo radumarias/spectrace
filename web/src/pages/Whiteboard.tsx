@@ -3,17 +3,19 @@
 // a draft spec that opens in the diagram editor and is saved as a pull
 // request. `/board` lists the project's boards; `/board/<id>` is one board.
 // A flowchart's text stays its source: the quick shapes rewrite it.
-import { lazy, Suspense, useDeferredValue, useEffect, useId, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useBoard, useBoards, useCreateBoard, useDeleteBoard, useSaveBoard, type Board } from "../api/boards";
 import { useCurrentProject, type Project } from "../api/queries";
+import { useDraftRequirements, useRequirementSets } from "../api/requirements";
 import { useNewSpec } from "../api/specs";
 import { Button, Card, PageHead, Pill } from "../ui/parts";
 import { useToast } from "../ui/Toast";
 import { addBox, connect, draftSpec, isFlowchart, removeBox, rename, requirementsOf, segmentOf, shapesOf, type Block, type BlockKind } from "../spec/board";
 import { Diagram } from "../spec/Diagram";
+import { MermaidPreview } from "../spec/MermaidPreview";
 
 const SpecEditor = lazy(() => import("../spec/SpecEditor").then((m) => ({ default: m.SpecEditor })));
 
@@ -70,28 +72,6 @@ export function BoardIndex() {
       )}
     </div>
   );
-}
-
-/** Any Mermaid diagram pele draws, loaded with its diagram type on demand. */
-function MermaidPreview({ text, label }: { text: string; label: string }) {
-  const prefix = useId().replace(/[^a-zA-Z0-9]/g, "");
-  const [out, setOut] = useState<{ svg: string } | { error: string } | null>(null);
-  useEffect(() => {
-    let live = true;
-    import("pele/lazy")
-      .then((m) => m.renderAsync(text, { idPrefix: `wb${prefix}`, linkSchemes: ["http", "https", "mailto"] }))
-      .then(
-        (r) => live && setOut({ svg: r.svg }),
-        (e: unknown) => live && setOut({ error: e instanceof Error ? e.message : String(e) }),
-      );
-    return () => {
-      live = false;
-    };
-  }, [text, prefix]);
-  if (!out) return <p className="sub">Drawing…</p>;
-  if ("error" in out) return <p className="dia-error" role="alert">{out.error}</p>;
-  // pele builds the SVG from the board's own text and escapes labels.
-  return <div className="board-svg" role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: out.svg }} />;
 }
 
 /** Add a box, connect two, rename, delete: each rewrites the flowchart's text. */
@@ -287,6 +267,8 @@ function BoardEditor({ project, board }: { project: Project; board: Board }) {
   const save = useSaveBoard(project.id, board.id);
   const remove = useDeleteBoard(project.id);
   const newSpec = useNewSpec(project.id);
+  const draftReqs = useDraftRequirements(project.id);
+  const fromHere = (useRequirementSets(project.id).data ?? []).filter((r) => r.boardId === board.id);
   const [title, setTitle] = useState(board.title);
   const [blocks, setBlocks] = useState<Block[]>(board.blocks);
   const [state, setState] = useState<"saved" | "saving" | "error">("saved");
@@ -295,11 +277,14 @@ function BoardEditor({ project, board }: { project: Project; board: Board }) {
   // The content last loaded from the server: the page's own copy is saved
   // only when it differs, so a board the coordinator drew is not saved back.
   const synced = useRef(JSON.stringify({ title: board.title, blocks: board.blocks }));
+  // Versions this page saved itself: a reload that returns one of them is an
+  // echo of our own save, not someone else's change, and must not reset edits made since.
+  const sent = useRef(new Set<string>());
 
   // The coordinator drew on the board (or a change of its was undone): take that version.
   useEffect(() => {
     const next = JSON.stringify({ title: board.title, blocks: board.blocks });
-    if (next === synced.current) return;
+    if (next === synced.current || sent.current.has(next)) return;
     synced.current = next;
     setTitle(board.title);
     setBlocks(board.blocks);
@@ -311,8 +296,11 @@ function BoardEditor({ project, board }: { project: Project; board: Board }) {
     if (JSON.stringify({ title, blocks }) === synced.current) return;
     setState("saving");
     const t = window.setTimeout(() => {
+      const body = { title: title.trim() || "Untitled board", blocks };
+      sent.current.add(JSON.stringify(body));
+      if (sent.current.size > 20) sent.current.delete(sent.current.values().next().value!);
       save.mutate(
-        { title: title.trim() || "Untitled board", blocks },
+        body,
         {
           onSuccess: (saved) => {
             synced.current = JSON.stringify({ title: saved.title, blocks: saved.blocks });
@@ -385,6 +373,14 @@ function BoardEditor({ project, board }: { project: Project; board: Board }) {
             {state === "saving" ? "Saving…" : state === "error" ? "Not saved, retrying on the next change" : "Saved"}
           </span>
           <Button
+            variant="primary"
+            small
+            disabled={draftReqs.isPending || state === "saving" || blocks.every((b) => !b.text.trim() || b.text.trim() === "flowchart LR")}
+            onClick={() => draftReqs.mutate(board.id, { onSuccess: (set) => navigate(`/req/${set.id}`), onError: (e) => toast(e.message) })}
+          >
+            {draftReqs.isPending ? "Drafting requirements…" : "Draft requirements"}
+          </Button>
+          <Button
             small
             onClick={() =>
               remove.mutate(board.id, {
@@ -414,6 +410,24 @@ function BoardEditor({ project, board }: { project: Project; board: Board }) {
           Any Mermaid type pele draws: flowchart, sequence, state, class, ER, mindmap, gantt and more.
         </span>
       </div>
+      {draftReqs.isPending && (
+        <Card>
+          <p className="sub" role="status">
+            Writing requirements from this board and your discussion: flows with stable ids, screen mockups and diagrams. This can take a minute.
+          </p>
+        </Card>
+      )}
+      {fromHere.length > 0 && (
+        <p className="sub" style={{ fontSize: 13 }}>
+          Requirements from this board:{" "}
+          {fromHere.map((r, i) => (
+            <span key={r.id}>
+              {i > 0 && ", "}
+              <Link to={`/req/${r.id}`}>{r.title}</Link>
+            </span>
+          ))}
+        </p>
+      )}
       {drafted && <DraftSetup project={project} board={{ ...board, title }} block={drafted} onOpen={(d) => void openDraft(d)} onCancel={() => setDrafting(null)} />}
       {blocks.length === 0 && (
         <Card>

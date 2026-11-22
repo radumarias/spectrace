@@ -16,7 +16,7 @@ const SpecParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { na
 // The core's parsed model (crates/core-wasm TS_TYPES), so the OpenAPI document says what `model` holds.
 const Span = z.object({ start: z.number().int(), end: z.number().int() }).openapi("SpecSpan");
 const Located = z.object({ line: z.number().int(), span: Span });
-const Diagnostic = z
+export const Diagnostic = z
   .object({ code: z.string().openapi({ example: "S008" }), file: z.string(), line: z.number().int(), message: z.string() })
   .openapi("SpecDiagnostic");
 const Requirement = z
@@ -57,7 +57,7 @@ const Diagram = z
     comments: z.array(z.object({ text: z.string(), line: z.number().int(), span: Span })),
   })
   .openapi("SpecDiagram");
-const Model = z
+export const Model = z
   .object({
     flow: z.string(),
     title: z.object({ text: z.string(), id: z.string(), line: z.number().int(), span: Span }).nullable(),

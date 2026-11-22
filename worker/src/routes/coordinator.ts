@@ -18,6 +18,7 @@ const ActionSchema = z
     label: z.string(),
     pullId: z.string().optional(),
     path: z.string().optional().openapi({ description: "For `open`: the app route to go to, such as /pr/<id>." }),
+    boardId: z.string().optional().openapi({ description: "For `draft_requirements`: the whiteboard to draft from." }),
   })
   .openapi("CoordinatorAction", { description: "Something the coordinator proposes. Nothing runs until the user clicks it." });
 
@@ -306,6 +307,7 @@ export function registerCoordinator(app: App) {
       merge_pull: () => call("POST", `/api/projects/${p}/pulls/${pull}/merge`, {}),
       sync_pulls: () => call("POST", `/api/projects/${p}/pulls/sync`, {}),
       reindex: () => call("POST", `/api/projects/${p}/reindex`),
+      draft_requirements: () => call("POST", `/api/projects/${p}/requirements`, { boardId: action.boardId }),
     }[action.kind];
     const res = await req();
     const ok = res.status < 300;
@@ -315,6 +317,7 @@ export function registerCoordinator(app: App) {
       merge_pull: "Merged.",
       sync_pulls: "Pulling the latest from GitHub.",
       reindex: "Indexing the project again.",
+      draft_requirements: "",
     }[action.kind];
     const failed =
       action.kind === "review_pull" && res.status === 404 && !errorText(res.body).startsWith("pull request")
@@ -324,7 +327,14 @@ export function registerCoordinator(app: App) {
       await c.env.DB.prepare("UPDATE coordinator_messages SET ran = ?1 WHERE id = ?2").bind(JSON.stringify([...msg.ran, index]), messageId).run();
       msg.ran = [...msg.ran, index];
     }
-    const note = await insert(c, projectId, user.id, { role: "coordinator", text: ok ? done : failed });
+    const drafted = ok && action.kind === "draft_requirements" ? (res.body as { id: string; title: string; flows: unknown[]; ids: string[] }) : null;
+    const note = drafted
+      ? await insert(c, projectId, user.id, {
+          role: "coordinator",
+          text: `I drafted ${drafted.title}: ${drafted.flows.length} ${drafted.flows.length === 1 ? "flow" : "flows"} and ${drafted.ids.filter((i) => i.includes("/")).length} requirements, each with its own id.`,
+          actions: [{ kind: "open", label: "Open the requirements", path: `/req/${drafted.id}` }],
+        })
+      : await insert(c, projectId, user.id, { role: "coordinator", text: ok ? done : failed });
     return c.json({ ok, messages: [msg, toMessage(note)] }, 200);
   });
 
