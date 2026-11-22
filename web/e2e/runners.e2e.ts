@@ -7,6 +7,7 @@ test("saves the user's own Anthropic API key", async ({ page }) => {
   await mockApi(page, {
     "/api/me": USER,
     "/api/projects": [{ id: "p1", name: "Shop app", context: "", created_at: "x", updated_at: "x", repos: [] }],
+    "/api/projects/p1/pulls": { pulls: [], counts: { needs: 0, open: 0, merged: 0 } },
     "/api/me/claude": (req: Request) => {
       if (req.method() === "PUT") setup = { ...setup, using: "own_key", keyHint: "WXYZ" };
       return setup;
