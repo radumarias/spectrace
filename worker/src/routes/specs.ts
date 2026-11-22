@@ -8,6 +8,7 @@ import type { AppEnv } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
 import { requireProjectOwner } from "./projects";
+import { github } from "./pulls";
 
 const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
 const SpecParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "specId", in: "path" } });
@@ -140,6 +141,111 @@ const getRoute = createRoute({
   },
 });
 
+const SpecChange = z
+  .object({
+    source: z.string().min(1).max(500_000).openapi({ description: "The whole spec file as edited." }),
+    summary: z.array(z.string().max(300)).max(100).openapi({ description: "One line per change, for the pull request.", example: ["Renamed Declined to Payment declined"] }),
+  })
+  .openapi("SpecChange");
+
+const SpecChangeOpened = z
+  .object({
+    number: z.number().int(),
+    url: z.string().openapi({ example: "https://github.com/acme/shop/pull/7" }),
+    branch: z.string().openapi({ example: "spectrace/spec-checkout-m3k2x1" }),
+  })
+  .openapi("SpecChangeOpened");
+
+const changeRoute = createRoute({
+  method: "post",
+  path: "/api/projects/{projectId}/specs/{specId}/changes",
+  summary: "Save an edited spec: commit it on a new branch and open a pull request",
+  request: {
+    params: z.object({ projectId: ProjectParam, specId: SpecParam }),
+    body: { content: { "application/json": { schema: SpecChange } }, required: true },
+  },
+  responses: {
+    201: { description: "The pull request", content: { "application/json": { schema: SpecChangeOpened } } },
+    400: err("Nothing changed, or the edited spec has errors"),
+    401: err("Not signed in"),
+    404: err("No such project or spec"),
+    409: err("The spec changed on GitHub since it was indexed, or GitHub refused"),
+  },
+});
+
+/** UTF-8 text as base64, for the contents API. */
+function base64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+const unbase64 = (b64: string) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, "")), (c) => c.charCodeAt(0)));
+
+type GhAnswer = { status: number; json: Record<string, unknown> };
+const refuse = (what: string, res: GhAnswer) =>
+  new AppError("conflict", `conflict: ${what}: ${typeof res.json.message === "string" ? res.json.message : `GitHub answered ${res.status}`}`);
+const encodePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+
+/** Commits `source` to `path` on a new branch from the default branch and opens a pull request for it. */
+async function openSpecPull(
+  env: AppEnv["Bindings"],
+  projectId: string,
+  login: string,
+  o: { repo: string; defaultBranch: string; path: string; flow: string; title: string; source: string; fileSha: string | null; summary: string[]; verb: "Edit" | "Add" },
+): Promise<z.infer<typeof SpecChangeOpened>> {
+  const { repo } = o;
+  const path = encodePath(o.path);
+  const head = await github(env, projectId, repo, "GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(o.defaultBranch)}`, undefined);
+  const base = (head.json.object as { sha?: unknown } | undefined)?.sha;
+  if (head.status !== 200 || typeof base !== "string") throw refuse(`reading ${o.defaultBranch}`, head);
+  const branch = `spectrace/spec-${o.flow}-${Date.now().toString(36)}`;
+  const ref = await github(env, projectId, repo, "POST", `/repos/${repo}/git/refs`, { ref: `refs/heads/${branch}`, sha: base });
+  if (ref.status !== 201) throw refuse(`creating ${branch}`, ref);
+  const lines = o.summary.length ? o.summary : [o.verb === "Add" ? "Added the spec" : "Edited the spec"];
+  const put = await github(env, projectId, repo, "PUT", `/repos/${repo}/contents/${path}`, {
+    message: `${o.verb} ${o.path}\n\n${lines.map((l) => `- ${l}`).join("\n")}`,
+    content: base64(o.source),
+    ...(o.fileSha ? { sha: o.fileSha } : {}),
+    branch,
+  });
+  if (put.status !== 200 && put.status !== 201) throw refuse(`committing ${o.path}`, put);
+  const pr = await github(env, projectId, repo, "POST", `/repos/${repo}/pulls`, {
+    title: o.verb === "Add" ? `Spec: add ${o.title || o.flow}` : `Spec: ${o.title || o.flow} (${lines.length} ${lines.length === 1 ? "change" : "changes"})`,
+    head: branch,
+    base: o.defaultBranch,
+    body: `${o.verb === "Add" ? "Drafted on a whiteboard and edited" : "Edited"} in the spectrace diagram editor by @${login}.\n\n${lines.map((l) => `- ${l}`).join("\n")}`,
+  });
+  if (pr.status !== 201 || typeof pr.json.number !== "number" || typeof pr.json.html_url !== "string") throw refuse("opening the pull request", pr);
+  return { number: pr.json.number, url: pr.json.html_url, branch };
+}
+
+const NewSpec = z
+  .object({
+    repoId: z.string().min(1).max(64),
+    path: z
+      .string()
+      .regex(/^(?:[A-Za-z0-9_.-]+\/)*spec\/(?:[a-z][a-z0-9_]*\/)*[a-z][a-z0-9_]{0,39}\.md$/)
+      .openapi({ example: "spec/sign_up.md", description: "Under a `spec/` folder; the file name is the flow id." }),
+    source: z.string().min(1).max(500_000),
+    summary: z.array(z.string().max(300)).max(100),
+  })
+  .openapi("NewSpec");
+
+const newRoute = createRoute({
+  method: "post",
+  path: "/api/projects/{projectId}/specs/new",
+  summary: "Add a new spec file (a whiteboard draft): commit it on a new branch and open a pull request",
+  request: { params: z.object({ projectId: ProjectParam }), body: { content: { "application/json": { schema: NewSpec } }, required: true } },
+  responses: {
+    201: { description: "The pull request", content: { "application/json": { schema: SpecChangeOpened } } },
+    400: err("The spec has errors"),
+    401: err("Not signed in"),
+    404: err("No such project or repo"),
+    409: err("The file already exists, or GitHub refused"),
+  },
+});
+
 interface SpecRow {
   id: string;
   full_name: string;
@@ -221,5 +327,55 @@ export function registerSpecs(app: OpenAPIHono<AppEnv>) {
       },
       200,
     );
+  });
+
+  app.openapi(changeRoute, async (c) => {
+    const user = await requireUser(c);
+    const { projectId, specId } = c.req.valid("param");
+    const { source, summary } = c.req.valid("json");
+    await requireProjectOwner(c.env.DB, user.id, projectId);
+    const row = await c.env.DB.prepare(
+      "SELECT s.path, s.flow, s.title, s.source, r.full_name, r.default_branch FROM specs s JOIN project_repos r ON r.id = s.repo_id WHERE s.id = ?1 AND s.project_id = ?2",
+    )
+      .bind(specId, projectId)
+      .first<{ path: string; flow: string; title: string; source: string; full_name: string; default_branch: string }>();
+    if (!row) throw AppError.notFound(`spec ${specId}`);
+    if (source === row.source) throw AppError.badRequest("nothing changed");
+    // Loaded here, not at the top: the OpenAPI script (Node) imports this file and has no WASM.
+    const { parseSpec } = await import("../core");
+    const errors = parseSpec(row.path, source).diagnostics.filter((d) => d.code.startsWith("S"));
+    if (errors.length) throw AppError.badRequest(`the edited spec has errors: ${errors.map((d) => `${d.code} line ${d.line} ${d.message}`).join("; ")}`);
+
+    const repo = row.full_name;
+    const path = encodePath(row.path);
+    const file = await github(c.env, projectId, repo, "GET", `/repos/${repo}/contents/${path}?ref=${encodeURIComponent(row.default_branch)}`, undefined);
+    if (file.status !== 200 || typeof file.json.sha !== "string" || typeof file.json.content !== "string") throw refuse(`reading ${row.path}`, file);
+    if (unbase64(file.json.content) !== row.source) {
+      throw new AppError("conflict", `conflict: ${row.path} changed on ${row.default_branch} since it was indexed; re-index the repo and edit again`);
+    }
+    const opened = await openSpecPull(c.env, projectId, user.login, { repo, defaultBranch: row.default_branch, path: row.path, flow: row.flow, title: row.title, source, fileSha: file.json.sha, summary, verb: "Edit" });
+    return c.json(opened, 201);
+  });
+
+  app.openapi(newRoute, async (c) => {
+    const user = await requireUser(c);
+    const { projectId } = c.req.valid("param");
+    const { repoId, path: file, source, summary } = c.req.valid("json");
+    await requireProjectOwner(c.env.DB, user.id, projectId);
+    const repo = await c.env.DB.prepare("SELECT full_name, default_branch FROM project_repos WHERE id = ?1 AND project_id = ?2")
+      .bind(repoId, projectId)
+      .first<{ full_name: string; default_branch: string }>();
+    if (!repo) throw AppError.notFound(`repo ${repoId}`);
+    const { parseSpec } = await import("../core");
+    const parsed = parseSpec(file, source);
+    const errors = parsed.diagnostics.filter((d) => d.code.startsWith("S"));
+    if (errors.length) throw AppError.badRequest(`the spec has errors: ${errors.map((d) => `${d.code} line ${d.line} ${d.message}`).join("; ")}`);
+    const there = await github(c.env, projectId, repo.full_name, "GET", `/repos/${repo.full_name}/contents/${encodePath(file)}?ref=${encodeURIComponent(repo.default_branch)}`, undefined);
+    if (there.status === 200) throw new AppError("conflict", `conflict: ${file} already exists on ${repo.default_branch}`);
+    if (there.status !== 404) throw refuse(`checking ${file}`, there);
+    const flow = parsed.spec.flow;
+    const title = parsed.spec.title?.text ?? flow;
+    const opened = await openSpecPull(c.env, projectId, user.login, { repo: repo.full_name, defaultBranch: repo.default_branch, path: file, flow, title, source, fileSha: null, summary, verb: "Add" });
+    return c.json(opened, 201);
   });
 }

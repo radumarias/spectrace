@@ -5,6 +5,7 @@ import { AppError, errorResponse } from "./error";
 import { log } from "./log";
 import { registerAi } from "./routes/ai";
 import { registerAuth } from "./routes/auth";
+import { registerBoards } from "./routes/boards";
 import { registerGithub } from "./routes/github";
 import { registerHealth } from "./routes/health";
 import { registerJobs } from "./routes/jobs";
@@ -45,6 +46,7 @@ export function createApp() {
   registerPulls(app);
   registerPullActions(app);
   registerSpecs(app);
+  registerBoards(app);
   registerDevpage(app);
 
   app.doc("/api/openapi.json", { openapi: "3.1.0", info: { title: "spectrace API", version: "0.1.0" } });

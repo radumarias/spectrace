@@ -64,3 +64,29 @@ details.flash{outline:2px solid var(--accent);outline-offset:4px}
 
 /* devpage server's page for the spec, on this origin (/d/<id>/). */
 .devpage-frame{display:block;width:100%;height:min(78vh,900px);border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+
+/* Diagram editor (T5.2), as in the prototype's edit mode. */
+.spec-dia .pele-node[data-st=new] :is(rect,polygon,circle){fill:var(--warn-soft);stroke:var(--warn);stroke-dasharray:5 3}
+.edit-bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px;border-radius:10px;background:var(--accent-soft)}
+.edit-bar .hint{font-size:12px;color:var(--muted);margin-right:auto}
+.edit-bar .btn.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.req-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:6px 8px;align-items:center;padding:8px;border-radius:8px;background:var(--sunk)}
+.req-row .ears{font-size:10px}
+.req-row .x{grid-row:1 / span 2;grid-column:3}
+.req-row input,.arrow-lbl input{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;min-height:38px;min-width:0;width:100%}
+.arrow-lbl{flex:1;min-width:0}
+.arrow-lbl input{padding:6px 8px;font:12px var(--f-mono);min-height:34px}
+.editing .icon-btn:hover{color:var(--bad);border-color:var(--bad)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.save-sum ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:2px}
+
+/* Whiteboard (T5.7). */
+.board-title{font:700 clamp(22px,2.4vw,28px)/1.2 var(--f-display);letter-spacing:-.015em;color:var(--fg);background:transparent;border:1px solid transparent;border-radius:8px;padding:2px 6px;margin-left:-7px;width:100%;min-width:0}
+.board-title:hover,.board-title:focus{border-color:var(--line);background:var(--surface)}
+.board-cols{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:12px;align-items:start}
+@media (max-width:900px){.board-cols{grid-template-columns:minmax(0,1fr)}}
+.board-text{width:100%;min-height:180px;resize:vertical;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:10px;font:400 12.5px/1.6 var(--f-mono)}
+.board-preview{min-width:0}
+.board-svg{overflow:auto;max-width:100%}
+.board-svg svg{display:block;max-width:100%;height:auto;margin:0 auto}
+.fld select{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:8px 10px;font:inherit;font-size:13px;min-height:38px}
