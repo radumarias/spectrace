@@ -2895,6 +2895,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/requirements/{setId}/pull": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add the set's spec files to a repo: commit them on a new branch and open a pull request
+         * @description Each flow becomes `spec/<flow>.md` with the same ids, and its mockups, diagrams and notes `spec/<flow>.views.md`. The pull request lists every id as a checklist for anchoring code and tests with `#[spec("<id>")]`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    setId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        repoId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The set, with its pull request */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RequirementSet"];
+                    };
+                };
+                /** @description A flow has errors */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project, set or repo */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already opened, a file already exists, or GitHub refused */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{projectId}/requirements": {
         parameters: {
             query?: never;
@@ -3574,6 +3658,12 @@ export interface components {
             views: components["schemas"]["RequirementView"][];
             /** @description Every id this set has issued, in order. An id is never reused. */
             ids: string[];
+            /** @description The pull request that added the set's spec files to a repo; null until one is opened. */
+            pull: {
+                repo: string;
+                number: number;
+                url: string;
+            } | null;
             createdAt: string;
             updatedAt: string;
         } | null;

@@ -610,6 +610,58 @@ describe("a new spec from a whiteboard", () => {
   });
 });
 
+describe("a requirements set as a pull request", () => {
+  const SIGN_UP = "# Sign up {#sign_up}\n\n```mermaid\nflowchart LR\n  form[Form]\n  done[Done]\n\n  form -->|submit| done\n```\n\n## Form {#sign_up.form}\n\n- WHEN the user submits the form THE SYSTEM SHALL send a confirmation email. {#r1}\n\n## Done {#sign_up.done}\n\n- WHEN the email link is opened THE SYSTEM SHALL show the welcome page. {#r1}\n";
+  const VIEWS = [
+    { id: "v1", of: "sign_up.form", kind: "mockup", title: "Form", text: "### Sign up\n\n- Email\n- [Create account]" },
+    { id: "v2", of: null, kind: "diagram", title: "Email flow", text: "sequenceDiagram\n  App->>Mail: send" },
+  ];
+  async function withSet(projectId: string, source = SIGN_UP) {
+    const id = crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO requirement_sets (id, project_id, title, flows, views, ids) VALUES (?1, ?2, 'Sign up', ?3, ?4, '[]')")
+      .bind(id, projectId, JSON.stringify([{ flow: "sign_up", title: "Sign up", source }]), JSON.stringify(VIEWS))
+      .run();
+    return id;
+  }
+  const open = (cookie: string, projectId: string, setId: string, repoId: string) =>
+    call(`/api/projects/${projectId}/requirements/${setId}/pull`, cookie, { method: "POST", body: JSON.stringify({ repoId }) });
+
+  it("commits each flow's spec and views on one branch, lists every id, and remembers the pull request", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const setId = await withSet(project.id);
+    const res = await open(cookie, project.id, setId, project.repos[0]!.id);
+    expect(res.status).toBe(201);
+    const set = (await res.json()) as { pull: { repo: string; number: number; url: string } };
+    expect(set.pull).toEqual({ repo: "acme/shop", number: 7, url: "https://github.com/acme/shop/pull/7" });
+    expect(ghWrites.map((w) => w.req)).toEqual(["POST /git/refs", "PUT /contents/spec/sign_up.md", "PUT /contents/spec/sign_up.views.md", "POST /pulls"]);
+    const decode = (b: Record<string, unknown>) => new TextDecoder().decode(Uint8Array.from(atob(b.content as string), (ch) => ch.charCodeAt(0)));
+    expect(decode(ghWrites[1]!.body)).toBe(SIGN_UP);
+    const views = decode(ghWrites[2]!.body);
+    expect(views).toContain("## Form (mockup of sign_up.form)\n\n### Sign up");
+    expect(views).toContain("## Also discussed\n\n### Email flow (diagram)\n\n```mermaid\nsequenceDiagram");
+    const pr = ghWrites[3]!.body as { title: string; body: string; base: string; head: string };
+    expect(pr).toMatchObject({ title: "Requirements: Sign up", base: "trunk" });
+    expect(pr.head).toMatch(/^spectrace\/req-sign_up-/);
+    expect(pr.body).toContain("- [ ] `sign_up.form` Form\n  - [ ] `sign_up.form/r1` WHEN the user submits the form THE SYSTEM SHALL send a confirmation email.");
+    expect(pr.body).toContain(`/req/${setId}`);
+    expect((await open(cookie, project.id, setId, project.repos[0]!.id)).status).toBe(409);
+  });
+
+  it("refuses a set with errors, a spec that already exists, and another project's repo", async () => {
+    const { cookie, project } = await setup(["acme/shop"]);
+    await deliver((await jobsOf(project.id))[0]!.id);
+    const repoId = project.repos[0]!.id;
+    expect((await open(cookie, project.id, await withSet(project.id, SIGN_UP.replace("  form -->|submit| done\n", "  form --> done\n")), repoId)).status).toBe(400);
+    const taken = await withSet(project.id, SHOP["spec/checkout.md"]!);
+    await env.DB.prepare("UPDATE requirement_sets SET flows = ?1 WHERE id = ?2").bind(JSON.stringify([{ flow: "checkout", title: "Checkout", source: SHOP["spec/checkout.md"] }]), taken).run();
+    expect((await open(cookie, project.id, taken, repoId)).status).toBe(409);
+    const other = await setup(["acme/shop"]);
+    expect((await open(cookie, project.id, await withSet(project.id), other.project.repos[0]!.id)).status).toBe(404);
+    expect(ghWrites).toEqual([]);
+  });
+});
+
 describe("boards", () => {
   it("keeps a project's whiteboards for its owner", async () => {
     const { cookie, project } = await setup([]);
