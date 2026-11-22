@@ -326,6 +326,43 @@ describe("POST /coordinator on a whiteboard: the coordinator draws while it talk
     expect((await getBoard(s, boardId)).title).toBe("Mine");
   });
 
+  it("tells every open device as it happens: thinking, the new messages, the board, and a hand edit", async () => {
+    const s = await seed();
+    const boardId = await withBoard(s);
+    const res = await call(`/api/projects/${s.projectId}/events`, s.cookie, { headers: { upgrade: "websocket" } });
+    expect(res.status).toBe(101);
+    const ws = res.webSocket!;
+    ws.accept();
+    type Frame = { id: number; event: string; data: Record<string, unknown> };
+    const frames: Frame[] = [];
+    ws.addEventListener("message", (e) => {
+      frames.push(JSON.parse(String(e.data)) as Frame);
+    });
+    const waitFor = async (count: number) => {
+      const deadline = Date.now() + 3000;
+      while (frames.length < count && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+      return frames;
+    };
+    replyWith = () => JSON.stringify({ reply: "Added.", board: [{ op: "add", kind: "note", text: "- a note" }] });
+    const out = (await (await call(s.base, s.cookie, { method: "POST", json: { text: "draw", screen: { route: "board", boardId } } })).json()) as Out;
+    await waitFor(3);
+    const userId = (await env.DB.prepare("SELECT id FROM users WHERE login = ?1").bind(s.login).first<{ id: string }>())!.id;
+    expect(frames.map((f) => [f.id, f.event])).toEqual([
+      [-1, "studio.thinking"],
+      [-1, "studio.messages"],
+      [-1, "studio.board"],
+    ]);
+    expect(frames[0]!.data).toEqual({ userId, boardId, setId: null });
+    expect(frames[2]!.data.boardId).toBe(boardId);
+
+    await call(`${s.base}/${out.messages[1]!.id}/undo`, s.cookie, { method: "POST" });
+    await call(`/api/projects/${s.projectId}/boards/${boardId}`, s.cookie, { method: "PUT", json: { title: "Mine", blocks: [] } });
+    await waitFor(6);
+    expect(frames.slice(3).map((f) => f.event)).toEqual(["studio.messages", "studio.board", "studio.board"]);
+    expect(frames[5]!.data.updatedAt).toBe((await getBoard(s, boardId)).updatedAt);
+    ws.close();
+  });
+
   it("changes nothing off a board, or on another project's board", async () => {
     const s = await seed();
     const other = await seed();

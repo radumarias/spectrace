@@ -14,6 +14,7 @@ import {
   VIEW_KINDS,
 } from "../requirements-types";
 import { exportFiles, pullBody } from "../requirements-export";
+import { studio } from "../studio-live";
 import { requireProjectOwner } from "./projects";
 import { Diagnostic, Model, openFilesPull } from "./specs";
 
@@ -266,6 +267,7 @@ export function registerRequirements(app: OpenAPIHono<AppEnv>) {
       .bind(row.id, projectId, repo.full_name, opened.number, opened.url)
       .first<SetRow>();
     if (!after) throw new AppError("internal", "requirement set vanished after opening its pull request");
+    await studio(c.env, projectId, "studio.requirements", { setId: after.id, updatedAt: after.updated_at });
     return c.json(await toSet(after), 201);
   });
 
@@ -355,6 +357,7 @@ export function registerRequirements(app: OpenAPIHono<AppEnv>) {
       .first<SetRow>();
     if (!row)
       throw new AppError("internal", "requirement set insert returned no row");
+    await studio(c.env, projectId, "studio.requirements", { setId: row.id, updatedAt: row.updated_at });
     return c.json(await toSet(row), 201);
   });
 

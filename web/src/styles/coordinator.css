@@ -16,3 +16,10 @@
 .drew{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px}
 .drew .tool{flex:1 1 100%}
 .tool.skip b{color:var(--bad)}
+
+/* Voice: the mic in the composer and the read-aloud toggle */
+.composer .mic{min-width:42px;min-height:42px;padding:0 10px}
+.btn.on{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.mic.on{animation:mic-pulse 1.2s ease-in-out infinite}
+@keyframes mic-pulse{50%{box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent)}}
+@media (prefers-reduced-motion: reduce){.mic.on{animation:none}}
