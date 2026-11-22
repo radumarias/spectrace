@@ -40,4 +40,4 @@ const fs=require("fs");const [f,id]=process.argv.slice(1);
 const c=JSON.parse(fs.readFileSync(f,"utf8"));
 for(const d of c.d1_databases??[])d.database_id=id;
 fs.writeFileSync(f,JSON.stringify(c,null,2));' "$CFG" "$DB_ID"
-(cd web && npm --prefix ../worker exec -- wrangler deploy --config "$CFG")
+(cd web && npm --prefix ../worker exec -- wrangler deploy --config "$CFG" ${WRANGLER_DEPLOY_ARGS:-})
