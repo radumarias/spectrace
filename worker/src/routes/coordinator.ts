@@ -3,6 +3,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import type { AppEnv } from "../env";
 import { requireUser } from "../auth";
+import { applyOps, type BoardBlock, type BoardContent } from "../board-ops";
 import { ACTION_KINDS, type Action, answer, type ApiGet, type Turn } from "../coordinator";
 import { AppError, ErrorBody } from "../error";
 import { requireProjectOwner } from "./projects";
@@ -28,9 +29,27 @@ const Message = z
     tools: z.array(z.string()).openapi({ description: "Read tools called for this reply, such as `pulls.list(filter=needs)`." }),
     actions: z.array(ActionSchema),
     ran: z.array(z.number().int()).openapi({ description: "Indexes of `actions` the user already ran." }),
+    board: z
+      .object({
+        boardId: z.string(),
+        changes: z.array(z.string()).openapi({ description: "What the coordinator changed on the board, in words, such as `Added a flowchart`." }),
+        undone: z.boolean(),
+      })
+      .nullable()
+      .openapi({ description: "The coordinator's changes to the whiteboard the user was on, already applied; null when it changed nothing." }),
     createdAt: z.string(),
   })
   .openapi("CoordinatorMessage");
+
+const BoardOut = z
+  .object({
+    id: z.string(),
+    title: z.string(),
+    blocks: z.array(z.object({ id: z.string(), kind: z.enum(["note", "mermaid"]), text: z.string() })),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("CoordinatorBoard", { description: "The whiteboard after the coordinator's change (or its undo)." });
 
 const Screen = z
   .object({
@@ -65,7 +84,10 @@ const sendRoute = createRoute({
     "It runs on Claude Code with the owner's subscription for CLAUDE_CODE_OWNER, else with your own API key, else with the server's.",
   request: { params: z.object({ projectId: ProjectParam }), body: { required: true, content: json(z.object({ text: z.string().trim().min(1).max(2000), screen: Screen })) } },
   responses: {
-    200: { description: "Your message and the coordinator's reply", content: json(z.object({ messages: z.array(Message) })) },
+    200: {
+      description: "Your message and the coordinator's reply; `board` is the whiteboard after the coordinator changed it, when it did",
+      content: json(z.object({ messages: z.array(Message), board: BoardOut.nullable() })),
+    },
     400: errors[400],
     401: errors[401],
     404: errors[404],
@@ -91,6 +113,20 @@ const runRoute = createRoute({
   },
 });
 
+const undoRoute = createRoute({
+  method: "post",
+  path: "/api/projects/{projectId}/coordinator/{messageId}/undo",
+  summary: "Undo the coordinator's change to the whiteboard",
+  description: "Puts the board back as it was before this reply changed it. Only while nobody changed the board since; otherwise 409.",
+  request: { params: z.object({ projectId: ProjectParam, messageId: MessageParam }) },
+  responses: {
+    200: { description: "The message, now undone, and the board as it was", content: json(z.object({ messages: z.array(Message), board: BoardOut })) },
+    401: errors[401],
+    404: errors[404],
+    409: { description: "Already undone, or the board changed since", content: json(ErrorBody) },
+  },
+});
+
 const clearRoute = createRoute({
   method: "delete",
   path: "/api/projects/{projectId}/coordinator",
@@ -106,8 +142,20 @@ interface Row {
   tools: string;
   actions: string;
   ran: string;
+  board: string | null;
   created_at: string;
 }
+
+interface BoardEdit {
+  boardId: string;
+  changes: string[];
+  before: BoardContent;
+  at: string;
+  undone: boolean;
+}
+type BoardRow = { id: string; title: string; blocks: string; created_at: string; updated_at: string };
+const toBoard = (r: BoardRow) => ({ id: r.id, title: r.title, blocks: parse<BoardBlock[]>(r.blocks, []), createdAt: r.created_at, updatedAt: r.updated_at });
+const COLS = "id, role, text, tools, actions, ran, board, created_at";
 
 const parse = <T>(s: string, fallback: T): T => {
   try {
@@ -124,17 +172,34 @@ const toMessage = (r: Row): z.infer<typeof Message> => ({
   tools: parse<string[]>(r.tools, []),
   actions: parse<Action[]>(r.actions, []),
   ran: parse<number[]>(r.ran, []),
+  board: r.board ? (({ boardId, changes, undone }: BoardEdit) => ({ boardId, changes, undone }))(parse<BoardEdit>(r.board, { boardId: "", changes: [], before: { title: "", blocks: [] }, at: "", undone: true })) : null,
   createdAt: r.created_at,
 });
 
 type Ctx = Context<AppEnv>;
 
-async function insert(c: Ctx, projectId: string, userId: string, m: { role: Row["role"]; text: string; screen?: unknown; tools?: string[]; actions?: Action[]; backend?: string }): Promise<Row> {
+async function insert(
+  c: Ctx,
+  projectId: string,
+  userId: string,
+  m: { role: Row["role"]; text: string; screen?: unknown; tools?: string[]; actions?: Action[]; backend?: string; board?: BoardEdit },
+): Promise<Row> {
   const row = await c.env.DB.prepare(
-    `INSERT INTO coordinator_messages (id, project_id, user_id, role, text, screen, tools, actions, backend) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-     RETURNING id, role, text, tools, actions, ran, created_at`,
+    `INSERT INTO coordinator_messages (id, project_id, user_id, role, text, screen, tools, actions, backend, board) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+     RETURNING ${COLS}`,
   )
-    .bind(crypto.randomUUID(), projectId, userId, m.role, m.text, m.screen ? JSON.stringify(m.screen) : null, JSON.stringify(m.tools ?? []), JSON.stringify(m.actions ?? []), m.backend ?? null)
+    .bind(
+      crypto.randomUUID(),
+      projectId,
+      userId,
+      m.role,
+      m.text,
+      m.screen ? JSON.stringify(m.screen) : null,
+      JSON.stringify(m.tools ?? []),
+      JSON.stringify(m.actions ?? []),
+      m.backend ?? null,
+      m.board ? JSON.stringify(m.board) : null,
+    )
     .first<Row>();
   if (!row) throw new AppError("internal", "coordinator message was not stored");
   return row;
@@ -168,7 +233,7 @@ export function registerCoordinator(app: App) {
     const { projectId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, user.id, projectId);
     const { results } = await c.env.DB.prepare(
-      `SELECT * FROM (SELECT id, role, text, tools, actions, ran, created_at, rowid AS n FROM coordinator_messages WHERE project_id = ?1 AND user_id = ?2 ORDER BY created_at DESC, rowid DESC LIMIT 100)
+      `SELECT * FROM (SELECT ${COLS}, rowid AS n FROM coordinator_messages WHERE project_id = ?1 AND user_id = ?2 ORDER BY created_at DESC, rowid DESC LIMIT 100)
        ORDER BY created_at, n`,
     )
       .bind(projectId, user.id)
@@ -191,16 +256,38 @@ export function registerCoordinator(app: App) {
     const mine = await insert(c, projectId, user.id, { role: "user", text, screen });
     const call = selfCall(app, c);
     const get: ApiGet = (path) => call("GET", path);
-    const out = await answer(c.env, user, { projectId, projectName: project?.name ?? "", history, question: text, screen, get });
-    const reply = await insert(c, projectId, user.id, { role: "coordinator", text: out.text, tools: out.tools, actions: out.actions, backend: out.backend });
-    return c.json({ messages: [toMessage(mine), toMessage(reply)] }, 200);
+    const readBoard = (id: string) => c.env.DB.prepare("SELECT id, title, blocks, created_at, updated_at FROM boards WHERE id = ?1 AND project_id = ?2").bind(id, projectId).first<BoardRow>();
+    const seen = screen.boardId ? await readBoard(screen.boardId) : null;
+    const board = seen ? { id: seen.id, title: seen.title, blocks: parse<BoardBlock[]>(seen.blocks, []) } : undefined;
+    const out = await answer(c.env, user, { projectId, projectName: project?.name ?? "", history, question: text, screen, board, get });
+
+    // The coordinator's pen: applied to the board as it is now (the user may
+    // have kept drawing while it thought), with the board before kept for undo.
+    let edit: BoardEdit | undefined;
+    let after: BoardRow | null = null;
+    const now = board && out.board.length ? await readBoard(board.id) : null;
+    if (now) {
+      const before = { title: now.title, blocks: parse<BoardBlock[]>(now.blocks, []) };
+      const next = applyOps(before, out.board);
+      if (next.changes.length) {
+        after = await c.env.DB.prepare(
+          `UPDATE boards SET title = ?3, blocks = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE id = ?1 AND project_id = ?2 RETURNING id, title, blocks, created_at, updated_at`,
+        )
+          .bind(now.id, projectId, next.title, JSON.stringify(next.blocks))
+          .first<BoardRow>();
+        if (after) edit = { boardId: after.id, changes: next.changes, before, at: after.updated_at, undone: false };
+      }
+    }
+    const reply = await insert(c, projectId, user.id, { role: "coordinator", text: out.text, tools: out.tools, actions: out.actions, backend: out.backend, board: edit });
+    return c.json({ messages: [toMessage(mine), toMessage(reply)], board: after ? toBoard(after) : null }, 200);
   });
 
   app.openapi(runRoute, async (c) => {
     const user = await requireUser(c);
     const { projectId, messageId, index } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, user.id, projectId);
-    const row = await c.env.DB.prepare("SELECT id, role, text, tools, actions, ran, created_at FROM coordinator_messages WHERE id = ?1 AND project_id = ?2 AND user_id = ?3")
+    const row = await c.env.DB.prepare(`SELECT ${COLS} FROM coordinator_messages WHERE id = ?1 AND project_id = ?2 AND user_id = ?3`)
       .bind(messageId, projectId, user.id)
       .first<Row>();
     if (!row) throw AppError.notFound(`message ${messageId}`);
@@ -239,6 +326,30 @@ export function registerCoordinator(app: App) {
     }
     const note = await insert(c, projectId, user.id, { role: "coordinator", text: ok ? done : failed });
     return c.json({ ok, messages: [msg, toMessage(note)] }, 200);
+  });
+
+  app.openapi(undoRoute, async (c) => {
+    const user = await requireUser(c);
+    const { projectId, messageId } = c.req.valid("param");
+    await requireProjectOwner(c.env.DB, user.id, projectId);
+    const row = await c.env.DB.prepare(`SELECT ${COLS} FROM coordinator_messages WHERE id = ?1 AND project_id = ?2 AND user_id = ?3`).bind(messageId, projectId, user.id).first<Row>();
+    const edit = row?.board ? parse<BoardEdit | null>(row.board, null) : null;
+    if (!row || !edit) throw AppError.notFound(`board change on message ${messageId}`);
+    if (edit.undone) throw new AppError("conflict", "conflict: already undone");
+    const restored = await c.env.DB.prepare(
+      `UPDATE boards SET title = ?3, blocks = ?4, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ?1 AND project_id = ?2 AND updated_at = ?5 RETURNING id, title, blocks, created_at, updated_at`,
+    )
+      .bind(edit.boardId, projectId, edit.before.title, JSON.stringify(edit.before.blocks), edit.at)
+      .first<BoardRow>();
+    if (!restored) {
+      const exists = await c.env.DB.prepare("SELECT 1 AS x FROM boards WHERE id = ?1 AND project_id = ?2").bind(edit.boardId, projectId).first();
+      if (!exists) throw AppError.notFound(`board ${edit.boardId}`);
+      throw new AppError("conflict", "conflict: the board changed after this; undo those changes on the board");
+    }
+    const undone = { ...edit, undone: true };
+    await c.env.DB.prepare("UPDATE coordinator_messages SET board = ?1 WHERE id = ?2").bind(JSON.stringify(undone), messageId).run();
+    return c.json({ messages: [toMessage({ ...row, board: JSON.stringify(undone) })], board: toBoard(restored) }, 200);
   });
 
   app.openapi(clearRoute, async (c) => {

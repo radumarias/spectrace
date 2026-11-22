@@ -292,17 +292,35 @@ function BoardEditor({ project, board }: { project: Project; board: Board }) {
   const [state, setState] = useState<"saved" | "saving" | "error">("saved");
   const [drafting, setDrafting] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ repoId: string; path: string; title: string; flow: string; source: string; summary: string } | null>(null);
-  const first = useRef(true);
+  // The content last loaded from the server: the page's own copy is saved
+  // only when it differs, so a board the coordinator drew is not saved back.
+  const synced = useRef(JSON.stringify({ title: board.title, blocks: board.blocks }));
+
+  // The coordinator drew on the board (or a change of its was undone): take that version.
+  useEffect(() => {
+    const next = JSON.stringify({ title: board.title, blocks: board.blocks });
+    if (next === synced.current) return;
+    synced.current = next;
+    setTitle(board.title);
+    setBlocks(board.blocks);
+    setState("saved");
+  }, [board]);
 
   // Saved 600 ms after the last change.
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    if (JSON.stringify({ title, blocks }) === synced.current) return;
     setState("saving");
     const t = window.setTimeout(() => {
-      save.mutate({ title: title.trim() || "Untitled board", blocks }, { onSuccess: () => setState("saved"), onError: () => setState("error") });
+      save.mutate(
+        { title: title.trim() || "Untitled board", blocks },
+        {
+          onSuccess: (saved) => {
+            synced.current = JSON.stringify({ title: saved.title, blocks: saved.blocks });
+            setState("saved");
+          },
+          onError: () => setState("error"),
+        },
+      );
     }, 600);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- save is stable enough; only content changes save

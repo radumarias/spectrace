@@ -12,6 +12,7 @@
 // The same JSON protocol works on both backends: Claude Code's `claude -p`
 // has no way to call the Worker's tools, so tools are not native tool use.
 import { MODELS } from "./ai";
+import { type BoardContent, type BoardOp, boardText, cleanOps } from "./board-ops";
 import { type AgentBackend, ask } from "./claude-code";
 import { log } from "./log";
 
@@ -190,7 +191,24 @@ export const callLabel = (c: ToolCall) => `${c.name}(${Object.entries(c.args).ma
 
 const ROUTES = "/home (inbox), /prs (pull requests), /pr/<pull id>, /spec (specs), /spec/<spec id>, /map (app map), /board (whiteboard), /agents, /runners, /project (project settings)";
 
-export function systemPrompt(): string {
+/** How the coordinator works with the user on a whiteboard: a design partner that draws while it talks. */
+export function boardPrompt(): string {
+  return [
+    "",
+    "On a whiteboard (the prompt then shows the board): the user is talking an idea through with you before it becomes requirements. Work like a design partner in a dialogue.",
+    "Reply in two to five short sentences, build on what they said, and ask at most one question at a time. Draw as you go: when there is something worth seeing, change the board in the same reply.",
+    'To change the board, add "board" to the reply shape: {"reply":"...","board":[<op>, ...]} with at most eight ops:',
+    '- {"op":"add","kind":"mermaid"|"note","text":"<whole block text>","after":"<block id, optional>"}',
+    '- {"op":"set","id":"<block id>","text":"<the whole new text>"} to rewrite a block (prefer this to adding a near copy)',
+    '- {"op":"remove","id":"<block id>"} and {"op":"title","text":"<board title>"}',
+    "Flows are Mermaid flowcharts: `flowchart LR`, one node per line as `id[Label]`, one edge per line with a label `a -->|label| b`. Node ids are lowercase snake_case and stay the same once drawn (they become the step ids of the spec), so rename a label, never an id.",
+    "Other views are any Mermaid diagram: sequenceDiagram, stateDiagram-v2, erDiagram, classDiagram, mindmap.",
+    "Notes are Markdown: requirements as `- <Box label>: WHEN <trigger> THE SYSTEM SHALL <behaviour>.`, open questions, and simple screen mockups as Markdown (headings, lists, tables, [buttons] in brackets).",
+    "The user sees each change and can undo it, so draw freely, but never remove what the user drew unless they ask.",
+  ].join("\n");
+}
+
+export function systemPrompt(onBoard = false): string {
   return [
     "You are the coordinator in spectrace, a spec-driven pull request review app. You are the main agent the user chats with.",
     "You answer questions about their project, pull requests, merge gates, specs and agents, and you hand work to other agents.",
@@ -208,6 +226,7 @@ export function systemPrompt(): string {
     "- approve_pull: approve the pull request (pullId). - merge_pull: merge it (pullId), only when every checked gate is ok.",
     ...AGENTS.map((a) => `- ${a.kind}: start the ${a.name} agent, which ${a.does}${a.kind === "review_pull" ? " (pullId)" : ""}.`),
     "Use ids from tool results for pullId, never a PR number.",
+    ...(onBoard ? [boardPrompt()] : []),
   ].join("\n");
 }
 
@@ -224,8 +243,9 @@ function screenLine(s: Screen): string {
   return parts.join(", ");
 }
 
-export function buildPrompt(o: { projectName: string; history: Turn[]; question: string; screen: Screen; results: { call: ToolCall; result: unknown }[]; last: boolean }): string {
+export function buildPrompt(o: { projectName: string; history: Turn[]; question: string; screen: Screen; board?: { id: string } & BoardContent; results: { call: ToolCall; result: unknown }[]; last: boolean }): string {
   const lines = [`Project: ${o.projectName}`, `The user is on: ${screenLine(o.screen)}`];
+  if (o.board) lines.push("", boardText(o.board.id, o.board));
   if (o.history.length) {
     lines.push("", "Conversation so far:");
     for (const t of o.history) lines.push(`${t.role === "user" ? "User" : "Coordinator"}: ${t.text}`);
@@ -239,7 +259,7 @@ export function buildPrompt(o: { projectName: string; history: Turn[]; question:
   return lines.join("\n");
 }
 
-export type Parsed = { kind: "tools"; calls: ToolCall[] } | { kind: "reply"; text: string; actions: Action[] };
+export type Parsed = { kind: "tools"; calls: ToolCall[] } | { kind: "reply"; text: string; actions: Action[]; board?: BoardOp[] };
 
 /** The first balanced `{...}` in `text`, or null. */
 function firstObject(text: string): string | null {
@@ -314,7 +334,8 @@ export function parseAnswer(text: string): Parsed {
   }
   if (o && typeof o.reply === "string") {
     const actions = (Array.isArray(o.actions) ? o.actions : []).map(cleanAction).filter((a): a is Action => a !== null).slice(0, 2);
-    return { kind: "reply", text: o.reply.trim(), actions };
+    const board = cleanOps(o.board);
+    return board.length ? { kind: "reply", text: o.reply.trim(), actions, board } : { kind: "reply", text: o.reply.trim(), actions };
   }
   return { kind: "reply", text: text.trim(), actions: [] };
 }
@@ -323,6 +344,8 @@ export interface Answer {
   text: string;
   tools: string[];
   actions: Action[];
+  /** Changes to the board the user is on; empty when not on a board. */
+  board: BoardOp[];
   backend: AgentBackend;
 }
 
@@ -332,7 +355,7 @@ export const MAX_ROUNDS = 4;
 export async function answer(
   env: Parameters<typeof ask>[0],
   user: { id: string; login: string },
-  o: { projectId: string; projectName: string; history: Turn[]; question: string; screen: Screen; get: ApiGet },
+  o: { projectId: string; projectName: string; history: Turn[]; question: string; screen: Screen; board?: { id: string } & BoardContent; get: ApiGet },
 ): Promise<Answer> {
   const results: { call: ToolCall; result: unknown }[] = [];
   let backend: AgentBackend = "api";
@@ -340,15 +363,16 @@ export async function answer(
     const last = round === MAX_ROUNDS;
     const out = await ask(env, user, {
       model: MODELS.sonnet,
-      maxTokens: 1200,
-      system: systemPrompt(),
-      prompt: buildPrompt({ projectName: o.projectName, history: o.history, question: o.question, screen: o.screen, results, last }),
+      maxTokens: o.board ? 6000 : 1200,
+      system: systemPrompt(!!o.board),
+      prompt: buildPrompt({ projectName: o.projectName, history: o.history, question: o.question, screen: o.screen, board: o.board, results, last }),
     });
     backend = out.backend;
     const parsed = parseAnswer(out.text);
     if (parsed.kind === "reply" || last) {
       const reply = parsed.kind === "reply" ? parsed : { text: "I could not finish looking that up. Try asking it a narrower way.", actions: [] };
-      return { text: reply.text || "…", tools: results.map((r) => callLabel(r.call)), actions: reply.actions, backend };
+      const board = o.board && parsed.kind === "reply" ? (parsed.board ?? []) : [];
+      return { text: reply.text || "…", tools: results.map((r) => callLabel(r.call)), actions: reply.actions, board, backend };
     }
     for (const call of parsed.calls) {
       const tool = TOOLS.find((t) => t.name === call.name);
@@ -363,5 +387,5 @@ export async function answer(
     }
   }
   /* c8 ignore next */
-  return { text: "…", tools: [], actions: [], backend };
+  return { text: "…", tools: [], actions: [], board: [], backend };
 }

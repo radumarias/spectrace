@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { type CoordinatorScreen, useAskCoordinator, useClearCoordinator, useCoordinator, useRunAction } from "../api/coordinator";
+import { type CoordinatorScreen, useAskCoordinator, useClearCoordinator, useCoordinator, useRunAction, useUndoBoard } from "../api/coordinator";
 import { usePull } from "../api/pulls";
 import type { Project } from "../api/queries";
 import { Button, Pill } from "../ui/parts";
@@ -8,6 +8,7 @@ import { useToast } from "../ui/Toast";
 import { TITLES } from "./nav";
 
 const GREETING = "Hi. I can see what you are looking at, and I can act on anything you can click. Ask me what needs you, or tell me what to change.";
+const BOARD_GREETING = "Tell me what you want to build. I'll ask questions and sketch it on this board as we talk: flows, other diagrams, notes and rough screens. Undo anything I draw with one click.";
 
 /** Suggested questions per screen, from the prototype. */
 export const SUGG: Record<string, string[]> = {
@@ -23,7 +24,7 @@ export const SUGG: Record<string, string[]> = {
   risk: ["Why is it risky?"],
   runners: ["What are the agents doing?"],
   talk: ["What needs me today?"],
-  board: ["What needs me today?"],
+  board: ["Sketch this flow with me", "Draw it as a sequence diagram", "What is missing?"],
 };
 
 /** What the user is looking at, from the URL. */
@@ -43,6 +44,7 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
   const askIt = useAskCoordinator(pid);
   const run = useRunAction(pid);
   const clear = useClearCoordinator(pid);
+  const undo = useUndoBoard(pid);
   const pull = usePull(open ? project?.id : undefined, screen.pullId).data;
   const navigate = useNavigate();
   const toast = useToast();
@@ -98,7 +100,7 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
       <div className="msgs" aria-live="polite" ref={list}>
         <div className="msg">
           <span className="by">Coordinator</span>
-          {project ? GREETING : "Open or create a project first. I work inside a project."}
+          {!project ? "Open or create a project first. I work inside a project." : screen.boardId ? BOARD_GREETING : GREETING}
         </div>
         {msgs.map((m) => (
           <div key={m.id} className={m.role === "user" ? "msg me" : "msg"}>
@@ -111,6 +113,22 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
                     <b>✓</b> {t}
                   </span>
                 ))}
+              </div>
+            )}
+            {m.board && m.board.changes.length > 0 && (
+              <div className="drew" aria-label="Changes to the board">
+                {m.board.changes.map((t, i) => (
+                  <span className="tool" key={i}>
+                    <b>✎</b> {t}
+                  </span>
+                ))}
+                {m.board.undone ? (
+                  <span className="mono sub" style={{ fontSize: 11.5 }}>Undone</span>
+                ) : (
+                  <Button variant="ghost" small disabled={undo.isPending} onClick={() => undo.mutate(m.id, { onError: (e) => toast(e.message) })}>
+                    Undo
+                  </Button>
+                )}
               </div>
             )}
             {m.actions.length > 0 && (
@@ -130,7 +148,7 @@ export function Coordinator({ open, onClose, pathname, project }: { open: boolea
             {pending}
           </div>
         )}
-        {askIt.isPending && <span className="mono sub" style={{ fontSize: 12 }}>coordinator is working…</span>}
+        {askIt.isPending && <span className="mono sub" style={{ fontSize: 12 }}>{screen.boardId ? "coordinator is thinking and sketching…" : "coordinator is working…"}</span>}
       </div>
       {project && (
         <div className="sugg">

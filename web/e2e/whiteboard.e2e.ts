@@ -16,6 +16,7 @@ test("a whiteboard flowchart becomes a draft spec in the diagram editor", async 
     "/api/me": USER,
     "/api/projects": [PROJECT],
     "/api/projects/p1/pulls": { pulls: [], counts: { needs: 0, open: 0, merged: 0 } },
+    "/api/projects/p1/coordinator": { messages: [] },
     "/api/projects/p1/boards": (req: import("@playwright/test").Request) => {
       if (req.method() === "POST") {
         board = { id: "w1", createdAt: "x", updatedAt: "2026-11-21T18:00:00Z", ...(req.postDataJSON() as Saved) };

@@ -2632,7 +2632,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Your message and the coordinator's reply */
+                /** @description Your message and the coordinator's reply; `board` is the whiteboard after the coordinator changed it, when it did */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2640,6 +2640,7 @@ export interface paths {
                     content: {
                         "application/json": {
                             messages: components["schemas"]["CoordinatorMessage"][];
+                            board: components["schemas"]["CoordinatorBoard"];
                         };
                     };
                 };
@@ -2804,6 +2805,78 @@ export interface paths {
                     };
                 };
                 /** @description Already ran */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/coordinator/{messageId}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo the coordinator's change to the whiteboard
+         * @description Puts the board back as it was before this reply changed it. Only while nobody changed the board since; otherwise 409.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    messageId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The message, now undone, and the board as it was */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            messages: components["schemas"]["CoordinatorMessage"][];
+                            board: components["schemas"]["CoordinatorBoard"];
+                        };
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already undone, or the board changed since */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3221,6 +3294,13 @@ export interface components {
             actions: components["schemas"]["CoordinatorAction"][];
             /** @description Indexes of `actions` the user already ran. */
             ran: number[];
+            /** @description The coordinator's changes to the whiteboard the user was on, already applied; null when it changed nothing. */
+            board: {
+                boardId: string;
+                /** @description What the coordinator changed on the board, in words, such as `Added a flowchart`. */
+                changes: string[];
+                undone: boolean;
+            } | null;
             createdAt: string;
         };
         /** @description Something the coordinator proposes. Nothing runs until the user clicks it. */
@@ -3232,6 +3312,19 @@ export interface components {
             /** @description For `open`: the app route to go to, such as /pr/<id>. */
             path?: string;
         };
+        /** @description The whiteboard after the coordinator's change (or its undo). */
+        CoordinatorBoard: {
+            id: string;
+            title: string;
+            blocks: {
+                id: string;
+                /** @enum {string} */
+                kind: "note" | "mermaid";
+                text: string;
+            }[];
+            createdAt: string;
+            updatedAt: string;
+        } | null;
         /** @description What the user is looking at. */
         CoordinatorScreen: {
             route: string;

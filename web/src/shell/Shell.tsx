@@ -31,7 +31,9 @@ export function Shell() {
 
   useEffect(() => {
     if (main.current) main.current.scrollTop = 0;
-    setAskOpen(false);
+    // On a whiteboard the coordinator sits beside the board (the requirements
+    // studio) wherever there is room for both; elsewhere it opens on demand.
+    setAskOpen(/^\/board\/[^/]+$/.test(pathname) && typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1101px)").matches);
   }, [pathname]);
 
   return (

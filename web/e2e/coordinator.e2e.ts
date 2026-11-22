@@ -29,6 +29,7 @@ test("'Can I merge?' on a pull request lists its open gates", async ({ page }) =
     "/api/projects/p1/pulls/pr-1": PULL,
     "/api/projects/p1/pulls/pr-1/reviews": { reviews: [] },
     "/api/projects/p1/pulls/pr-1/diff": { files: [] },
+    "/api/projects/p1/pulls/pr-1/agent-review": { review: null },
     "/api/projects/p1/coordinator": (req: Request) => {
       if (req.method() === "GET") return { messages: [] };
       asked = req.postDataJSON();

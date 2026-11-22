@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { boardKeys } from "./boards";
 import { api } from "./client";
 import type { components } from "./schema";
 
 export type CoordinatorMessage = components["schemas"]["CoordinatorMessage"];
 export type CoordinatorAction = components["schemas"]["CoordinatorAction"];
 export type CoordinatorScreen = components["schemas"]["CoordinatorScreen"];
+type CoordinatorBoard = NonNullable<components["schemas"]["CoordinatorBoard"]>;
 
 const key = (projectId: string) => ["coordinator", projectId] as const;
 
@@ -39,9 +41,34 @@ export function useAskCoordinator(projectId: string) {
     mutationFn: async (v: { text: string; screen: CoordinatorScreen }) => {
       const { data, error } = await api.POST("/api/projects/{projectId}/coordinator", { params: { path: { projectId } }, body: v });
       if (!data) throw message(error, "The coordinator could not answer.");
-      return data.messages;
+      return data;
     },
-    onSuccess: (add) => qc.setQueryData<CoordinatorMessage[]>(key(projectId), (old) => append(old, add)),
+    onSuccess: (out) => {
+      qc.setQueryData<CoordinatorMessage[]>(key(projectId), (old) => append(old, out.messages));
+      if (out.board) drew(qc, projectId, out.board);
+    },
+  });
+}
+
+/** The coordinator changed a board: the open board page takes the new version. */
+function drew(qc: ReturnType<typeof useQueryClient>, projectId: string, board: CoordinatorBoard) {
+  qc.setQueryData(boardKeys.one(projectId, board.id), board);
+  void qc.invalidateQueries({ queryKey: boardKeys.all(projectId), exact: true });
+}
+
+/** Undo the coordinator's change to the whiteboard. */
+export function useUndoBoard(projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (messageId: string) => {
+      const { data, error } = await api.POST("/api/projects/{projectId}/coordinator/{messageId}/undo", { params: { path: { projectId, messageId } } });
+      if (!data) throw message(error, "Could not undo that.");
+      return data;
+    },
+    onSuccess: (out) => {
+      qc.setQueryData<CoordinatorMessage[]>(key(projectId), (old) => append(old, out.messages));
+      if (out.board) drew(qc, projectId, out.board);
+    },
   });
 }
 
