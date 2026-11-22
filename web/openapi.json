@@ -1593,7 +1593,8 @@
               "approve_pull",
               "merge_pull",
               "sync_pulls",
-              "reindex"
+              "reindex",
+              "draft_requirements"
             ]
           },
           "label": {
@@ -1605,6 +1606,10 @@
           "path": {
             "type": "string",
             "description": "For `open`: the app route to go to, such as /pr/<id>."
+          },
+          "boardId": {
+            "type": "string",
+            "description": "For `draft_requirements`: the whiteboard to draft from."
           }
         },
         "required": [
@@ -1689,6 +1694,169 @@
           "route"
         ],
         "description": "What the user is looking at."
+      },
+      "RequirementSetSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "boardId": {
+            "type": "string",
+            "nullable": true
+          },
+          "flows": {
+            "type": "integer"
+          },
+          "requirements": {
+            "type": "integer"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "boardId",
+          "flows",
+          "requirements",
+          "updatedAt"
+        ]
+      },
+      "RequirementSet": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "boardId": {
+            "type": "string",
+            "nullable": true
+          },
+          "flows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequirementFlow"
+            }
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequirementView"
+            }
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every id this set has issued, in order. An id is never reused."
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "boardId",
+          "flows",
+          "views",
+          "ids",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "RequirementFlow": {
+        "type": "object",
+        "properties": {
+          "flow": {
+            "type": "string",
+            "example": "checkout"
+          },
+          "title": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "example": "spec/checkout.md",
+            "description": "Where the flow goes in a repo as a spec."
+          },
+          "source": {
+            "type": "string",
+            "description": "The flow as a spec file."
+          },
+          "model": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SpecModel"
+              },
+              {
+                "description": "Null when the flow has errors; see diagnostics."
+              }
+            ]
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpecDiagnostic"
+            }
+          }
+        },
+        "required": [
+          "flow",
+          "title",
+          "path",
+          "source",
+          "model",
+          "diagnostics"
+        ]
+      },
+      "RequirementView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "of": {
+            "type": "string",
+            "nullable": true,
+            "description": "The step or requirement id it illustrates, null for the whole set.",
+            "example": "checkout.failed/r1"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "mockup",
+              "diagram",
+              "note"
+            ],
+            "description": "`mockup` (a screen in Markdown), `diagram` (any Mermaid) or `note` (Markdown)."
+          },
+          "title": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "of",
+          "kind",
+          "title",
+          "text"
+        ]
       }
     },
     "parameters": {}
@@ -4762,6 +4930,258 @@
           },
           "409": {
             "description": "Already undone, or the board changed since",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/requirements": {
+      "get": {
+        "summary": "The project's requirements sets, most recently changed first",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RequirementSetSummary"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Draft requirements from a whiteboard and your conversation with the coordinator",
+        "description": "Claude turns the board and the discussion into flows in the spec format (steps and WHEN/SHALL requirements with stable ids) and views of those ids: screen mockups, other diagrams and notes. Each flow is checked by the spec parser; a flow that does not parse gets one repair round, and keeps its diagnostics if it still fails.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "boardId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9-]{1,64}$"
+                  }
+                },
+                "required": [
+                  "boardId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The drafted set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementSet"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Claude did not answer with requirements",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Neither Claude Code nor an Anthropic key is configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/requirements/{setId}": {
+      "get": {
+        "summary": "One requirements set: its flows (parsed) and views",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "setId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequirementSet"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a requirements set",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "setId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such project or set",
             "content": {
               "application/json": {
                 "schema": {

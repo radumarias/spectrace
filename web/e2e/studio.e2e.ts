@@ -28,6 +28,7 @@ test("the coordinator sketches on the whiteboard while you talk, and Undo takes 
     "/api/me": USER,
     "/api/projects": [PROJECT],
     "/api/projects/p1/pulls": { pulls: [], counts: { needs: 0, open: 0, merged: 0 } },
+    "/api/projects/p1/requirements": [],
     "/api/projects/p1/boards": [{ id: "w1", title: "Checkout", blocks: 1, updatedAt: BEFORE.updatedAt }],
     "/api/projects/p1/boards/w1": (req: Request) => {
       if (req.method() === "PUT") saves++;

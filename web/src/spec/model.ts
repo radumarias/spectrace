@@ -33,7 +33,7 @@ export interface Step {
 const ofStep = (a: SpecAnchor, stepId: string) => a.target === stepId || a.target.startsWith(`${stepId}/`);
 
 /** The steps of a spec in section order, with their requirements, anchors and status. */
-export function stepsOf(spec: SpecDetail): Step[] {
+export function stepsOf(spec: Pick<SpecDetail, "model" | "anchors">): Step[] {
   const model = spec.model;
   if (!model) return [];
   const labels = new Map((model.diagram?.nodes ?? []).map((n) => [n.id, n.label]));

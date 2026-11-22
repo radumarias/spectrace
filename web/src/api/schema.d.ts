@@ -2893,6 +2893,234 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/requirements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The project's requirements sets, most recently changed first */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Sets */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RequirementSetSummary"][];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Draft requirements from a whiteboard and your conversation with the coordinator
+         * @description Claude turns the board and the discussion into flows in the spec format (steps and WHEN/SHALL requirements with stable ids) and views of those ids: screen mockups, other diagrams and notes. Each flow is checked by the spec parser; a flow that does not parse gets one repair round, and keeps its diagnostics if it still fails.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        boardId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The drafted set */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RequirementSet"];
+                    };
+                };
+                /** @description Empty board */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or board */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Claude did not answer with requirements */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Neither Claude Code nor an Anthropic key is configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{projectId}/requirements/{setId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One requirements set: its flows (parsed) and views */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    setId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The set */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RequirementSet"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or set */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Delete a requirements set */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    setId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such project or set */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3306,11 +3534,13 @@ export interface components {
         /** @description Something the coordinator proposes. Nothing runs until the user clicks it. */
         CoordinatorAction: {
             /** @enum {string} */
-            kind: "open" | "review_pull" | "approve_pull" | "merge_pull" | "sync_pulls" | "reindex";
+            kind: "open" | "review_pull" | "approve_pull" | "merge_pull" | "sync_pulls" | "reindex" | "draft_requirements";
             label: string;
             pullId?: string;
             /** @description For `open`: the app route to go to, such as /pr/<id>. */
             path?: string;
+            /** @description For `draft_requirements`: the whiteboard to draft from. */
+            boardId?: string;
         };
         /** @description The whiteboard after the coordinator's change (or its undo). */
         CoordinatorBoard: {
@@ -3331,6 +3561,54 @@ export interface components {
             pullId?: string;
             specId?: string;
             boardId?: string;
+        };
+        RequirementSetSummary: {
+            id: string;
+            title: string;
+            boardId: string | null;
+            flows: number;
+            requirements: number;
+            updatedAt: string;
+        };
+        RequirementSet: {
+            id: string;
+            title: string;
+            boardId: string | null;
+            flows: components["schemas"]["RequirementFlow"][];
+            views: components["schemas"]["RequirementView"][];
+            /** @description Every id this set has issued, in order. An id is never reused. */
+            ids: string[];
+            createdAt: string;
+            updatedAt: string;
+        };
+        RequirementFlow: {
+            /** @example checkout */
+            flow: string;
+            title: string;
+            /**
+             * @description Where the flow goes in a repo as a spec.
+             * @example spec/checkout.md
+             */
+            path: string;
+            /** @description The flow as a spec file. */
+            source: string;
+            model: components["schemas"]["SpecModel"] & unknown;
+            diagnostics: components["schemas"]["SpecDiagnostic"][];
+        };
+        RequirementView: {
+            id: string;
+            /**
+             * @description The step or requirement id it illustrates, null for the whole set.
+             * @example checkout.failed/r1
+             */
+            of: string | null;
+            /**
+             * @description `mockup` (a screen in Markdown), `diagram` (any Mermaid) or `note` (Markdown).
+             * @enum {string}
+             */
+            kind: "mockup" | "diagram" | "note";
+            title: string;
+            text: string;
         };
     };
     responses: never;

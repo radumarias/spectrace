@@ -38,9 +38,10 @@ export interface Action {
   label: string;
   pullId?: string;
   path?: string;
+  boardId?: string;
 }
 
-export const ACTION_KINDS = ["open", "review_pull", "approve_pull", "merge_pull", "sync_pulls", "reindex"] as const;
+export const ACTION_KINDS = ["open", "review_pull", "approve_pull", "merge_pull", "sync_pulls", "reindex", "draft_requirements"] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
 
 /** The other agents the coordinator can hand work to, by action kind. */
@@ -48,6 +49,7 @@ export const AGENTS: { kind: ActionKind; name: string; does: string }[] = [
   { kind: "review_pull", name: "Reviewer", does: "reviews a pull request against its specs and writes findings and a walkthrough" },
   { kind: "sync_pulls", name: "Sync", does: "pulls the latest pull requests, reviews and checks from GitHub" },
   { kind: "reindex", name: "Indexer", does: "indexes the project's specs and code again" },
+  { kind: "draft_requirements", name: "Requirements writer", does: "turns a whiteboard and this discussion into requirements: flows with stable ids, screen mockups, diagrams and notes" },
 ];
 
 const enc = (s: string) => encodeURIComponent(s);
@@ -177,6 +179,12 @@ export const TOOLS: Tool[] = [
     },
   },
   {
+    name: "requirements.list",
+    args: "",
+    does: "the requirements sets drafted from whiteboards: title, board, flows and how many requirements",
+    run: (get, p) => must(get, `/api/projects/${enc(p)}/requirements`),
+  },
+  {
     name: "jobs.list",
     args: "",
     does: "what the agents and background jobs are doing: the 50 latest jobs and their state",
@@ -189,7 +197,7 @@ const TOOL_NAMES = new Set(TOOLS.map((t) => t.name));
 /** How a tool call shows under the reply: `pulls.list(filter=needs)`. */
 export const callLabel = (c: ToolCall) => `${c.name}(${Object.entries(c.args).map(([k, v]) => `${k}=${v}`).join(", ")})`;
 
-const ROUTES = "/home (inbox), /prs (pull requests), /pr/<pull id>, /spec (specs), /spec/<spec id>, /map (app map), /board (whiteboard), /agents, /runners, /project (project settings)";
+const ROUTES = "/home (inbox), /prs (pull requests), /pr/<pull id>, /spec (specs), /spec/<spec id>, /map (app map), /board (whiteboard), /board/<board id>, /req (requirements), /req/<set id>, /agents, /runners, /project (project settings)";
 
 /** How the coordinator works with the user on a whiteboard: a design partner that draws while it talks. */
 export function boardPrompt(): string {
@@ -205,6 +213,7 @@ export function boardPrompt(): string {
     "Other views are any Mermaid diagram: sequenceDiagram, stateDiagram-v2, erDiagram, classDiagram, mindmap.",
     "Notes are Markdown: requirements as `- <Box label>: WHEN <trigger> THE SYSTEM SHALL <behaviour>.`, open questions, and simple screen mockups as Markdown (headings, lists, tables, [buttons] in brackets).",
     "The user sees each change and can undo it, so draw freely, but never remove what the user drew unless they ask.",
+    "When the idea is clear enough to write down (the main flow is drawn and the open questions are answered), propose the draft_requirements action with this boardId; the user clicks it to get requirements with stable ids.",
   ].join("\n");
 }
 
@@ -224,7 +233,7 @@ export function systemPrompt(onBoard = false): string {
     "Actions are buttons the user must click; you never run them yourself. Propose one only when it is the obvious next step.",
     `- open: go to a screen. path is one of ${ROUTES}.`,
     "- approve_pull: approve the pull request (pullId). - merge_pull: merge it (pullId), only when every checked gate is ok.",
-    ...AGENTS.map((a) => `- ${a.kind}: start the ${a.name} agent, which ${a.does}${a.kind === "review_pull" ? " (pullId)" : ""}.`),
+    ...AGENTS.map((a) => `- ${a.kind}: start the ${a.name} agent, which ${a.does}${a.kind === "review_pull" ? " (pullId)" : a.kind === "draft_requirements" ? " (boardId)" : ""}.`),
     "Use ids from tool results for pullId, never a PR number.",
     ...(onBoard ? [boardPrompt()] : []),
   ].join("\n");
@@ -293,15 +302,20 @@ function cleanAction(a: unknown): Action | null {
     if (!pullId || !/^[A-Za-z0-9-]{1,64}$/.test(pullId)) return null;
     return { kind, label: label || defaultLabel(kind), pullId };
   }
+  if (kind === "draft_requirements") {
+    const boardId = str(o.boardId)?.trim();
+    if (!boardId || !/^[A-Za-z0-9-]{1,64}$/.test(boardId)) return null;
+    return { kind, label: label || defaultLabel(kind), boardId };
+  }
   if (kind === "open") {
-    if (!path || !/^\/(home|prs|pr\/[A-Za-z0-9-]{1,64}|spec(\/[A-Za-z0-9-]{1,64})?|map|board(\/[A-Za-z0-9-]{1,64})?|agents|runners|project|talk)$/.test(path)) return null;
+    if (!path || !/^\/(home|prs|pr\/[A-Za-z0-9-]{1,64}|spec(\/[A-Za-z0-9-]{1,64})?|map|board(\/[A-Za-z0-9-]{1,64})?|req(\/[A-Za-z0-9-]{1,64})?|agents|runners|project|talk)$/.test(path)) return null;
     return { kind, label: label || "Open", path };
   }
   return { kind, label: label || defaultLabel(kind) };
 }
 
 function defaultLabel(kind: ActionKind): string {
-  return { open: "Open", review_pull: "Start agent review", approve_pull: "Approve", merge_pull: "Merge", sync_pulls: "Pull from GitHub", reindex: "Re-index" }[kind];
+  return { open: "Open", review_pull: "Start agent review", approve_pull: "Approve", merge_pull: "Merge", sync_pulls: "Pull from GitHub", reindex: "Re-index", draft_requirements: "Draft requirements" }[kind];
 }
 
 /** Reads Claude's answer. Anything that is not the JSON protocol is taken as a plain reply. */

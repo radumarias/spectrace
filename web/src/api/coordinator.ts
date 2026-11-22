@@ -89,6 +89,7 @@ export function useRunAction(projectId: string) {
         void qc.invalidateQueries({ queryKey: ["pulls", projectId] });
         void qc.invalidateQueries({ queryKey: ["pull", projectId] });
         void qc.invalidateQueries({ queryKey: ["projects"] });
+        void qc.invalidateQueries({ queryKey: ["requirements", projectId] });
       }
     },
   });
