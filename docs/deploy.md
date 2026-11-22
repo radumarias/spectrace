@@ -54,6 +54,22 @@ devpage keeps every version and its SQLite store (through Litestream) in a bucke
 
 Until `DEVPAGE_BUCKET_URL` is set, devpage is off: nothing is published and the Markdown tab shows spectrace's own rendering. Locally, `just dev` never builds the image; to try devpage, run `devpage server` (with `DEVPAGE_BUCKET_URL=file:///some/folder DEVPAGE_DATA_DIR=/some/data DEVPAGE_USER_HEADER=x-spectrace-user`) and put `DEVPAGE_ORIGIN=http://127.0.0.1:3030` in `worker/.dev.vars`.
 
+## Claude through AI Gateway
+
+Agents and reviews call Claude through [Cloudflare AI Gateway](https://developers.cloudflare.com/ai-gateway/) (`worker/src/ai.ts`). Models: `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`.
+
+**Use a standard Anthropic API key (console.anthropic.com), billed per token.** A Claude Pro/Max subscription token (`claude setup-token`) is not supported: Anthropic's terms only allow it inside Claude Code and Claude.ai, not in a server-side app or the Messages API.
+
+```sh
+cd worker
+npx wrangler secret put ANTHROPIC_API_KEY        # sk-ant-..., never commit or paste it in chat
+npx wrangler secret put AI_GATEWAY_ACCOUNT_ID    # your Cloudflare account id
+npx wrangler secret put AI_GATEWAY_ID            # optional, default "default"
+npx wrangler secret put CF_AIG_TOKEN             # only if the gateway has Authentication on: a token with "AI Gateway: Run"
+```
+
+If you store the Anthropic key in the gateway itself (BYOK), skip `ANTHROPIC_API_KEY` and set only `CF_AIG_TOKEN`. Check it signed in with `GET /api/ai/health`: it sends one 16-token Haiku message and answers 503 until configured.
+
 ## Cost
 
 Workers, D1 and static assets are all within the free plan for this app at its current size. The devpage container needs the Workers Paid plan; it sleeps after 30 minutes without requests, and R2 storage for spec versions is small.

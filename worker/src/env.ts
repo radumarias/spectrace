@@ -34,6 +34,13 @@ export interface Bindings {
   AWS_REGION?: string;
   /** A devpage server reached over HTTP instead of the container: a local `devpage server`, or a fake in tests. */
   DEVPAGE_ORIGIN?: string;
+  /** Claude through Cloudflare AI Gateway (src/ai.ts). Secrets: `ANTHROPIC_API_KEY` (a standard API key; optional when the gateway stores one), `CF_AIG_TOKEN` (only if the gateway requires auth). Vars: account id, gateway id (default "default"). The AI routes answer 503 until configured. */
+  ANTHROPIC_API_KEY?: string;
+  CF_AIG_TOKEN?: string;
+  AI_GATEWAY_ACCOUNT_ID?: string;
+  AI_GATEWAY_ID?: string;
+  /** Overrides the gateway URL (tests). */
+  ANTHROPIC_BASE_URL?: string;
   /** Overrides for tests: default `https://github.com` and `https://api.github.com`. */
   GITHUB_OAUTH_URL?: string;
   GITHUB_API_URL?: string;
