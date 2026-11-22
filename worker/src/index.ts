@@ -2,6 +2,7 @@ import { createApp } from "./app";
 import type { Bindings } from "./env";
 import { INDEX_KIND, indexRepo } from "./jobs/index-repo";
 import { consume, registerHandler, type JobMessage } from "./jobs/queue";
+import "./jobs/review"; // registers the "review" job kind
 import "./jobs/sync"; // registers the "sync" job kind
 
 export { ClaudeCodeRunner } from "./claude-code-container";

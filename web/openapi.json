@@ -601,6 +601,142 @@
           "createdAt"
         ]
       },
+      "AgentReview": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "pullId": {
+            "type": "string"
+          },
+          "jobId": {
+            "type": "string",
+            "nullable": true
+          },
+          "headSha": {
+            "type": "string",
+            "description": "The commit that was reviewed."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "stage": {
+            "type": "string",
+            "description": "queued, reading, reviewing, refuting, done or failed."
+          },
+          "walkthrough": {
+            "type": "string",
+            "description": "Markdown, set once the review succeeded."
+          },
+          "backend": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "claude-code",
+              "user_key",
+              "api",
+              null
+            ],
+            "description": "Which Claude ran it: the owner's subscription, the requester's own key, or the server's key."
+          },
+          "model": {
+            "type": "string",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            },
+            "description": "Findings a refuter confirmed, most severe first."
+          },
+          "dropped": {
+            "type": "integer",
+            "description": "Findings the refuters could not confirm, left out."
+          }
+        },
+        "required": [
+          "id",
+          "pullId",
+          "jobId",
+          "headSha",
+          "state",
+          "stage",
+          "walkthrough",
+          "backend",
+          "model",
+          "error",
+          "createdAt",
+          "finishedAt",
+          "findings",
+          "dropped"
+        ]
+      },
+      "Finding": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "nullable": true
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "suggestedFix": {
+            "type": "string"
+          },
+          "spec": {
+            "type": "string",
+            "nullable": true,
+            "description": "Path of the spec the finding breaks, when it names one."
+          }
+        },
+        "required": [
+          "id",
+          "severity",
+          "path",
+          "line",
+          "title",
+          "body",
+          "suggestedFix",
+          "spec"
+        ]
+      },
       "SpecSummary": {
         "type": "object",
         "properties": {
@@ -3308,6 +3444,151 @@
           },
           "502": {
             "description": "GitHub could not be reached or refused the call",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/pulls/{pullId}/agent-review": {
+      "post": {
+        "summary": "Start an agent review of the pull request's head commit (or get the one already under way)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "pullId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Queued or already running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "review": {
+                      "$ref": "#/components/schemas/AgentReview"
+                    }
+                  },
+                  "required": [
+                    "review"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The queue is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "The latest agent review of the pull request",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "pullId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The latest review, or null when there is none",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "review": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/AgentReview"
+                        },
+                        {
+                          "nullable": true
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "review"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {

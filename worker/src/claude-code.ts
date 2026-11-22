@@ -65,14 +65,23 @@ async function claudeCodeFetch(env: Bindings, path: string, init: RequestInit): 
   throw new AppError("not_configured", "Claude Code is not configured on this server (CLAUDE_CODE_OAUTH_TOKEN)");
 }
 
+/** Waits before asking a busy container again (it runs a few prompts at a time and answers 429 past that). */
+const BUSY_WAITS_MS = [2_000, 5_000, 10_000, 20_000];
+
 /** One headless Claude Code run in the container. */
 export async function runClaudeCode(env: Bindings, req: ClaudeCodeRequest): Promise<ClaudeCodeResult> {
   let res: Response;
-  try {
-    res = await claudeCodeFetch(env, "/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req) });
-  } catch (cause) {
-    if (cause instanceof AppError) throw cause;
-    throw new AppError("upstream", "Claude Code container request failed", { cause });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await claudeCodeFetch(env, "/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req) });
+    } catch (cause) {
+      if (cause instanceof AppError) throw cause;
+      throw new AppError("upstream", "Claude Code container request failed", { cause });
+    }
+    const wait = BUSY_WAITS_MS[attempt];
+    if (res.status !== 429 || wait === undefined) break;
+    await res.body?.cancel();
+    await new Promise((r) => setTimeout(r, wait));
   }
   const body = (await res.json().catch(() => null)) as (ClaudeCodeResult & { error?: { code?: string; message?: string } }) | null;
   if (!res.ok || !body || typeof body.result !== "string") {
@@ -92,6 +101,8 @@ export interface AskRequest {
   prompt: string;
   system?: string;
   maxTokens: number;
+  /** Wall-clock limit of a Claude Code run (the container's default is 10 minutes). */
+  timeoutMs?: number;
 }
 
 export interface AskResult {
@@ -108,7 +119,7 @@ export interface AskResult {
  */
 export async function ask(env: Bindings, user: { id: string; login: string }, req: AskRequest): Promise<AskResult> {
   if (subscriptionFor(env, user.login)) {
-    const out = await runClaudeCode(env, { prompt: req.prompt, model: req.model, system: req.system, maxTurns: 1 });
+    const out = await runClaudeCode(env, { prompt: req.prompt, model: req.model, system: req.system, maxTurns: 1, ...(req.timeoutMs ? { timeoutMs: req.timeoutMs } : {}) });
     return { backend: "claude-code", model: out.model ?? req.model, text: out.result.trim() };
   }
   const own = env.SECRETS_KEY ? await userKey(env, user.id) : null;

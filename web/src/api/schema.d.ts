@@ -1919,6 +1919,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{projectId}/pulls/{pullId}/agent-review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The latest agent review of the pull request */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    pullId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The latest review, or null when there is none */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            review: components["schemas"]["AgentReview"] & unknown;
+                        };
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Start an agent review of the pull request's head commit (or get the one already under way) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    pullId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Queued or already running */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            review: components["schemas"]["AgentReview"];
+                        };
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The queue is unavailable */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{projectId}/specs": {
         parameters: {
             query?: never;
@@ -2604,6 +2715,44 @@ export interface components {
             headSha: string;
             githubReviewId: number | null;
             createdAt: string;
+        };
+        AgentReview: {
+            id: string;
+            pullId: string;
+            jobId: string | null;
+            /** @description The commit that was reviewed. */
+            headSha: string;
+            /** @enum {string} */
+            state: "queued" | "running" | "succeeded" | "failed";
+            /** @description queued, reading, reviewing, refuting, done or failed. */
+            stage: string;
+            /** @description Markdown, set once the review succeeded. */
+            walkthrough: string;
+            /**
+             * @description Which Claude ran it: the owner's subscription, the requester's own key, or the server's key.
+             * @enum {string|null}
+             */
+            backend: "claude-code" | "user_key" | "api" | null;
+            model: string | null;
+            error: string | null;
+            createdAt: string;
+            finishedAt: string | null;
+            /** @description Findings a refuter confirmed, most severe first. */
+            findings: components["schemas"]["Finding"][];
+            /** @description Findings the refuters could not confirm, left out. */
+            dropped: number;
+        };
+        Finding: {
+            id: number;
+            /** @enum {string} */
+            severity: "high" | "medium" | "low";
+            path: string;
+            line: number | null;
+            title: string;
+            body: string;
+            suggestedFix: string;
+            /** @description Path of the spec the finding breaks, when it names one. */
+            spec: string | null;
         };
         SpecSummary: {
             id: string;
