@@ -1369,6 +1369,112 @@
           "title",
           "blocks"
         ]
+      },
+      "CoordinatorMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "coordinator"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Read tools called for this reply, such as `pulls.list(filter=needs)`."
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CoordinatorAction"
+            }
+          },
+          "ran": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            },
+            "description": "Indexes of `actions` the user already ran."
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "text",
+          "tools",
+          "actions",
+          "ran",
+          "createdAt"
+        ]
+      },
+      "CoordinatorAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "open",
+              "review_pull",
+              "approve_pull",
+              "merge_pull",
+              "sync_pulls",
+              "reindex"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "pullId": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "For `open`: the app route to go to, such as /pr/<id>."
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "description": "Something the coordinator proposes. Nothing runs until the user clicks it."
+      },
+      "CoordinatorScreen": {
+        "type": "object",
+        "properties": {
+          "route": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "pullId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "specId": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "boardId": {
+            "type": "string",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "route"
+        ],
+        "description": "What the user is looking at."
       }
     },
     "parameters": {}
@@ -3878,6 +3984,338 @@
           },
           "404": {
             "description": "No such project or board",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/coordinator": {
+      "get": {
+        "summary": "Your conversation with the project's coordinator, oldest first (last 100 messages)",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CoordinatorMessage"
+                      }
+                    }
+                  },
+                  "required": [
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Ask the coordinator",
+        "description": "The coordinator reads what it needs through this API as you (pull requests, gates, specs, jobs) and answers, with up to two proposed actions. It runs on Claude Code with the owner's subscription for CLAUDE_CODE_OWNER, else with your own API key, else with the server's.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "screen": {
+                    "$ref": "#/components/schemas/CoordinatorScreen"
+                  }
+                },
+                "required": [
+                  "text",
+                  "screen"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Your message and the coordinator's reply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CoordinatorMessage"
+                      }
+                    }
+                  },
+                  "required": [
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Claude refused or could not be reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Neither Claude Code nor an Anthropic key is configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Start a new conversation with the coordinator",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CoordinatorMessage"
+                      }
+                    }
+                  },
+                  "required": [
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{projectId}/coordinator/{messageId}/actions/{index}": {
+      "post": {
+        "summary": "Run an action the coordinator proposed (your click)",
+        "description": "Runs the action through the same API as the buttons on each page: start the Reviewer agent (`review_pull`), approve, merge, pull from GitHub, re-index. `open` is navigation and runs in the browser. The outcome is added to the conversation.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$"
+            },
+            "required": true,
+            "name": "projectId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,64}$"
+            },
+            "required": true,
+            "name": "messageId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "nullable": true,
+              "minimum": 0,
+              "maximum": 9
+            },
+            "required": false,
+            "name": "index",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The outcome, and the coordinator's note about it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "messages": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CoordinatorMessage"
+                      }
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "messages"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already ran",
             "content": {
               "application/json": {
                 "schema": {
