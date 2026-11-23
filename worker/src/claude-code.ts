@@ -119,7 +119,7 @@ export interface AskResult {
  */
 export async function ask(env: Bindings, user: { id: string; login: string }, req: AskRequest): Promise<AskResult> {
   if (subscriptionFor(env, user.login)) {
-    const out = await runClaudeCode(env, { prompt: req.prompt, model: req.model, system: req.system, maxTurns: 1, ...(req.timeoutMs ? { timeoutMs: req.timeoutMs } : {}) });
+    const out = await runClaudeCode(env, { prompt: req.prompt, model: req.model, system: req.system, maxTurns: 1, timeoutMs: req.timeoutMs });
     return { backend: "claude-code", model: out.model ?? req.model, text: out.result.trim() };
   }
   const own = env.SECRETS_KEY ? await userKey(env, user.id) : null;

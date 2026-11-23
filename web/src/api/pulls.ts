@@ -83,11 +83,6 @@ export function usePullDiff(projectId: string | undefined, pullId: string | unde
 
 export type PullReview = components["schemas"]["PullReview"];
 
-function apiError(error: unknown, fallback: string): Error {
-  const message = (error as { error?: { message?: string } } | undefined)?.error?.message;
-  return new Error(message ?? fallback);
-}
-
 /** The reviews you left from spectrace, newest first. */
 export function usePullReviews(projectId: string | undefined, pullId: string | undefined) {
   return useQuery({
@@ -115,7 +110,7 @@ export function useReviewPull(projectId: string, pullId: string) {
         params: { path: { projectId, pullId } },
         body: input,
       });
-      if (!data) throw apiError(error, "Could not leave the review.");
+      if (!data) throw message(error, "Could not leave the review.");
       return data;
     },
     onSuccess: () => refreshPulls(qc),
@@ -129,7 +124,7 @@ export function useMergePull(projectId: string, pullId: string) {
       const { data, error } = await api.POST("/api/projects/{projectId}/pulls/{pullId}/merge", {
         params: { path: { projectId, pullId } },
       });
-      if (!data) throw apiError(error, "Could not merge the pull request.");
+      if (!data) throw message(error, "Could not merge the pull request.");
       return data;
     },
     onSuccess: () => refreshPulls(qc),
@@ -139,17 +134,23 @@ export function useMergePull(projectId: string, pullId: string) {
 export type AgentReview = components["schemas"]["AgentReview"];
 export type Finding = components["schemas"]["Finding"];
 
-export const agentReviewKey = (projectId: string | undefined, pullId: string | undefined) => ["agent-review", projectId, pullId] as const;
+export const agentReviewKeys = {
+  all: (projectId: string) => ["agent-review", projectId] as const,
+  one: (projectId: string | undefined, pullId: string | undefined) => ["agent-review", projectId, pullId] as const,
+};
 
-const isRunning = (r: AgentReview | null | undefined) => r?.state === "queued" || r?.state === "running";
+export const isRunning = (r: AgentReview | null | undefined): r is AgentReview & { state: "queued" | "running" } => r?.state === "queued" || r?.state === "running";
+
+/** A finished review of the pull request's current head commit. */
+export const isCurrentReview = (r: AgentReview | null | undefined, p: { headSha: string }): boolean => r?.state === "succeeded" && r.headSha === p.headSha;
 
 /**
- * The latest agent review of a pull request. Live events refresh it; while one
- * runs it is also read again every few seconds, in case the socket is down.
+ * The latest agent review of a pull request. Live events move it along; while
+ * one runs it is also read every 30 s, a fallback for a socket that is down.
  */
 export function useAgentReview(projectId: string | undefined, pullId: string | undefined) {
   return useQuery({
-    queryKey: agentReviewKey(projectId, pullId),
+    queryKey: agentReviewKeys.one(projectId, pullId),
     enabled: Boolean(projectId && pullId),
     queryFn: async (): Promise<AgentReview | null> => {
       const { data, response } = await api.GET("/api/projects/{projectId}/pulls/{pullId}/agent-review", {
@@ -158,7 +159,7 @@ export function useAgentReview(projectId: string | undefined, pullId: string | u
       if (!data) throw new Error(`Could not load the agent review (${response.status}).`);
       return data.review;
     },
-    refetchInterval: (q) => (isRunning(q.state.data) ? 5000 : false),
+    refetchInterval: (q) => (isRunning(q.state.data) ? 30_000 : false),
   });
 }
 
@@ -168,9 +169,9 @@ export function useRunAgentReview(projectId: string, pullId: string) {
   return useMutation({
     mutationFn: async (): Promise<AgentReview> => {
       const { data, error } = await api.POST("/api/projects/{projectId}/pulls/{pullId}/agent-review", { params: { path: { projectId, pullId } } });
-      if (!data) throw apiError(error, "Could not start the agent review.");
+      if (!data) throw message(error, "Could not start the agent review.");
       return data.review;
     },
-    onSuccess: (review) => qc.setQueryData(agentReviewKey(projectId, pullId), review),
+    onSuccess: (review) => qc.setQueryData(agentReviewKeys.one(projectId, pullId), review),
   });
 }

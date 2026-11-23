@@ -40,7 +40,7 @@ export const MAX_PATCH_CHARS = 60_000;
 /** D1 allows 100 bound values per statement. */
 const FILE_ROWS_PER_INSERT = 12;
 
-const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+export const NOW = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 
 /**
  * Statements that store one PR, and its files when they were just read. Run

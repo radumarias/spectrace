@@ -157,3 +157,5 @@ figcaption{font:400 10px var(--f-mono);color:var(--muted)}
 .finding.f-high{border-left:4px solid var(--bad)}
 .finding.f-medium{border-left:4px solid var(--warn)}
 .finding.f-low{border-left:4px solid var(--idle)}
+.findings-banner{padding:10px 12px;border-radius:10px;background:var(--warn-soft)}
+.findings-banner>span{font-size:13px;margin-right:auto}

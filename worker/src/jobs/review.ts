@@ -11,10 +11,11 @@
 // the server's key through AI Gateway. `target` is the review id; the review
 // row says who asked, which picks the backend.
 import { MODELS } from "../ai";
-import { ask, type AskResult } from "../claude-code";
+import { ask } from "../claude-code";
 import type { Bindings } from "../env";
 import { AppError } from "../error";
-import { PermanentError, registerHandler, type JobHandler, type JobRow } from "./queue";
+import { NOW } from "../pulls";
+import { errorMessage, isFinalFailure, PermanentError, registerHandler, type JobHandler } from "./queue";
 
 export const REVIEW_KIND = "review";
 
@@ -47,6 +48,8 @@ export interface Verdict {
   real: boolean;
   reason: string;
 }
+
+type Progress = (data: Record<string, unknown>) => Promise<void>;
 
 interface ReviewRow {
   id: string;
@@ -189,23 +192,19 @@ export function finderPrompt(pr: Pick<PullInfo, "repo" | "number" | "title" | "b
 
 export function refuterPrompt(pr: Pick<PullInfo, "repo" | "number" | "title">, finding: Finding, files: FileDiff[], specs: SpecText[]): string {
   const own = files.filter((f) => f.path === finding.path);
-  const shown = own.length ? own : files;
-  const spec = finding.spec ? specs.filter((s) => s.path === finding.spec) : specs;
+  const named = specs.filter((s) => s.path === finding.spec);
   return [
     `Pull request ${pr.repo}#${pr.number}: ${pr.title}`,
     `\n## The finding\n${JSON.stringify({ severity: finding.severity, path: finding.path, line: finding.line, title: finding.title, body: finding.body, spec: finding.spec })}`,
-    `\n## Specs\n${specsText(spec.length ? spec : specs)}`,
-    `\n## Diff${own.length ? ` of ${finding.path}` : ""}\n${diffText(shown)}`,
+    `\n## Specs\n${specsText(named.length ? named : specs)}`,
+    `\n## Diff${own.length ? ` of ${finding.path}` : ""}\n${diffText(own.length ? own : files)}`,
     "\nIs the finding real? Answer with the JSON object.",
   ].join("\n");
 }
 
-async function setStage(env: Bindings, job: JobRow, reviewId: string, stage: string, progress: (d: Record<string, unknown>) => Promise<void>, extra: Record<string, unknown> = {}) {
-  // Touching the job keeps its lease: a long model call must not look like a dead worker.
-  await env.DB.batch([
-    env.DB.prepare("UPDATE reviews SET stage = ?2, state = 'running' WHERE id = ?1").bind(reviewId, stage),
-    env.DB.prepare("UPDATE jobs SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1").bind(job.id),
-  ]);
+/** Show the review's stage on its row and tell the browsers (progress also keeps the job's lease). */
+async function setStage(env: Bindings, reviewId: string, stage: string, progress: Progress, extra: Record<string, unknown> = {}) {
+  await env.DB.prepare("UPDATE reviews SET stage = ?2, state = 'running' WHERE id = ?1").bind(reviewId, stage).run();
   await progress({ review: reviewId, stage, ...extra });
 }
 
@@ -235,59 +234,54 @@ async function touchedSpecs(env: Bindings, repoId: string, paths: string[]): Pro
   return results;
 }
 
-async function inBatches<T, R>(items: T[], size: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+async function inBatches<T, R>(items: T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array<R>(items.length);
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
       const i = next++;
-      out[i] = await fn(items[i]!, i);
+      out[i] = await fn(items[i]!);
     }
   };
   await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
   return out;
 }
 
-/** Errors that a retry cannot fix: nothing is configured to run Claude. */
-const permanent = (e: unknown) => e instanceof PermanentError || (e instanceof AppError && (e.code === "not_configured" || e.code === "not_found"));
-
 const reviewHandler: JobHandler = async (job, { env, progress }) => {
   const review = await env.DB.prepare("SELECT id, pull_request_id, requested_by, head_sha FROM reviews WHERE id = ?1").bind(job.target).first<ReviewRow>();
   if (!review) throw new PermanentError(`review ${job.target} not found`);
   try {
-    await runReview(env, job, review, progress);
+    await runReview(env, review, progress);
   } catch (error) {
-    const final = permanent(error) || job.attempts >= job.max_attempts;
-    if (final) {
-      const message = error instanceof Error ? error.message : String(error);
-      await env.DB.prepare("UPDATE reviews SET state = 'failed', stage = 'failed', error = ?2, finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1")
-        .bind(review.id, message.slice(0, 500))
+    // Show the failure on the review once the queue gives up on the job.
+    if (isFinalFailure(job, error)) {
+      await env.DB.prepare(`UPDATE reviews SET state = 'failed', stage = 'failed', error = ?2, finished_at = ${NOW} WHERE id = ?1`)
+        .bind(review.id, errorMessage(error).slice(0, 500))
         .run();
     }
-    if (permanent(error) && !(error instanceof PermanentError)) throw new PermanentError(error instanceof Error ? error.message : String(error));
     throw error;
   }
 };
 
-async function runReview(env: Bindings, job: JobRow, review: ReviewRow, progress: (d: Record<string, unknown>) => Promise<void>) {
-  await setStage(env, job, review.id, "reading", progress);
+async function runReview(env: Bindings, review: ReviewRow, progress: Progress) {
+  await setStage(env, review.id, "reading", progress);
   const pr = await loadPull(env, review);
   const { results: files } = await env.DB.prepare("SELECT path, status, patch FROM pr_files WHERE pull_request_id = ?1 ORDER BY path").bind(pr.id).all<FileDiff>();
   if (files.length === 0) throw new PermanentError("no changed files are stored for this pull request; pull from GitHub first");
   const specs = await touchedSpecs(env, pr.repo_id, files.map((f) => f.path));
   const user = { id: review.requested_by, login: pr.login };
 
-  await setStage(env, job, review.id, "reviewing", progress, { specs: specs.length, files: files.length });
-  const found: AskResult = await ask(env, user, { model: FINDER_MODEL, system: FINDER_SYSTEM, prompt: finderPrompt(pr, files, specs), maxTokens: 16_000, timeoutMs: 9 * 60_000 });
+  await setStage(env, review.id, "reviewing", progress, { specs: specs.length, files: files.length });
+  const found = await ask(env, user, { model: FINDER_MODEL, system: FINDER_SYSTEM, prompt: finderPrompt(pr, files, specs), maxTokens: 16_000, timeoutMs: 9 * 60_000 });
   const answer = parseFinderAnswer(found.text);
   if (!answer) throw new AppError("upstream", "the reviewer's answer was not the expected JSON");
 
-  await setStage(env, job, review.id, "refuting", progress, { findings: answer.findings.length });
+  await setStage(env, review.id, "refuting", progress, { findings: answer.findings.length });
   let checked = 0;
   const verdicts = await inBatches(answer.findings, REFUTERS_AT_ONCE, async (f) => {
     const out = await ask(env, user, { model: REFUTER_MODEL, system: REFUTER_SYSTEM, prompt: refuterPrompt(pr, f, files, specs), maxTokens: 2_000, timeoutMs: 5 * 60_000 });
     checked++;
-    await setStage(env, job, review.id, "refuting", progress, { findings: answer.findings.length, checked });
+    await progress({ review: review.id, stage: "refuting", findings: answer.findings.length, checked });
     return parseVerdict(out.text);
   });
 
@@ -305,7 +299,7 @@ async function runReview(env: Bindings, job: JobRow, review: ReviewRow, progress
   statements.push(
     env.DB.prepare(
       `UPDATE reviews SET state = 'succeeded', stage = 'done', walkthrough = ?2, backend = ?3, model = ?4, error = NULL,
-         finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1`,
+         finished_at = ${NOW} WHERE id = ?1`,
     ).bind(review.id, answer.walkthrough, found.backend, found.model),
   );
   await env.DB.batch(statements);
