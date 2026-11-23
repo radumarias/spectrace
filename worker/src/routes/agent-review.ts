@@ -76,6 +76,9 @@ const latest = createRoute({
   },
 });
 
+/** A job that has reported nothing for this long is taken as dead (its progress keeps it fresh every minute). */
+const JOB_ALIVE = "j.state IN ('queued', 'running') AND j.updated_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-10 minutes')";
+
 interface ReviewRow {
   id: string;
   pull_request_id: string;
@@ -144,11 +147,11 @@ export function registerAgentReview(app: OpenAPIHono<AppEnv>) {
     const pr = await pullOf(c.env.DB, projectId, pullId);
 
     // A review of this commit whose job is still under way covers the request. Its job reports
-    // progress at every stage, so one silent for 10 minutes is stale (the same rule as a sync).
+    // progress at least every minute, so one silent for 10 minutes is stale (the same rule as a sync).
     const running = await c.env.DB.prepare(
       `SELECT r.* FROM reviews r JOIN jobs j ON j.id = r.job_id
-        WHERE r.pull_request_id = ?1 AND r.head_sha = ?2 AND j.state IN ('queued', 'running')
-          AND j.updated_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-10 minutes') ORDER BY r.created_at DESC LIMIT 1`,
+        WHERE r.pull_request_id = ?1 AND r.head_sha = ?2
+          AND ${JOB_ALIVE} ORDER BY r.created_at DESC LIMIT 1`,
     )
       .bind(pr.id, pr.head_sha)
       .first<ReviewRow>();
@@ -172,7 +175,17 @@ export function registerAgentReview(app: OpenAPIHono<AppEnv>) {
     const { projectId, pullId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
     const pr = await pullOf(c.env.DB, projectId, pullId);
-    const row = await c.env.DB.prepare("SELECT * FROM reviews WHERE pull_request_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1").bind(pr.id).first<ReviewRow>();
-    return c.json({ review: row ? await toReview(c.env, row) : null }, 200);
+    // A review whose job ended or went silent without saying so (dead-lettered, or its Worker was stopped) shows as failed, so it can be run again.
+    const row = await c.env.DB.prepare(
+      `SELECT r.*, (r.job_id IS NOT NULL AND NOT COALESCE(${JOB_ALIVE}, 0)) AS stopped FROM reviews r LEFT JOIN jobs j ON j.id = r.job_id
+        WHERE r.pull_request_id = ?1 ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`,
+    )
+      .bind(pr.id)
+      .first<ReviewRow & { stopped: number }>();
+    if (!row) return c.json({ review: null }, 200);
+    const { stopped, ...review } = row;
+    const live = review.state === "queued" || review.state === "running";
+    const shown: ReviewRow = stopped && live ? { ...review, state: "failed", stage: "failed", error: "the review stopped before it finished" } : review;
+    return c.json({ review: await toReview(c.env, shown) }, 200);
   });
 }

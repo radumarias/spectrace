@@ -28,6 +28,8 @@ const MAX_CONTEXT = 8_000;
 const MAX_FINDINGS = 20;
 /** Refuters at once; the Claude Code container runs two prompts at a time. */
 const REFUTERS_AT_ONCE = 2;
+/** Progress this often while a model call runs, so the job keeps its 2-minute lease (queue.ts LEASE_SECONDS). */
+const KEEPALIVE_MS = 60_000;
 
 const FINDER_MODEL = MODELS.opus;
 const REFUTER_MODEL = MODELS.sonnet;
@@ -69,6 +71,8 @@ interface PullInfo {
   base_ref: string;
   context: string;
   login: string;
+  /** The commit whose changed files are stored in pr_files (null before they were first read). */
+  files_sha: string | null;
 }
 
 interface FileDiff {
@@ -84,8 +88,10 @@ interface SpecText {
 
 /** The first JSON object in a model's answer, which may wrap it in prose or a code fence. */
 export function parseJsonObject(text: string): Record<string, unknown> | null {
+  // The whole answer first: a fence inside one of the object's strings (a code
+  // snippet in the walkthrough) must not be taken for the answer.
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
-  const candidates = [fenced?.[1], text];
+  const candidates = [text, fenced?.[1]];
   for (const c of candidates) {
     if (!c) continue;
     const start = c.indexOf("{");
@@ -103,10 +109,17 @@ export function parseJsonObject(text: string): Record<string, unknown> | null {
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
-/** The finder's answer, cleaned: unknown severities become "low", findings without a title are dropped. */
+/** The model's severity word as ours: stronger words count as high, and a word we don't know as medium, never quietly as low. */
+function severityOf(word: string): Severity {
+  if (["high", "critical", "blocker", "major", "severe"].includes(word)) return "high";
+  if (["low", "minor", "nit", "info", "trivial"].includes(word)) return "low";
+  return "medium";
+}
+
+/** The finder's answer, cleaned: unknown severities become "medium", findings without a title are dropped. */
 export function parseFinderAnswer(text: string): { walkthrough: string; findings: Finding[] } | null {
   const obj = parseJsonObject(text);
-  if (!obj) return null;
+  if (!obj || (typeof obj.walkthrough !== "string" && !Array.isArray(obj.findings))) return null;
   const walkthrough = str(obj.walkthrough, 20_000);
   const raw = Array.isArray(obj.findings) ? obj.findings : [];
   const findings: Finding[] = [];
@@ -118,7 +131,7 @@ export function parseFinderAnswer(text: string): { walkthrough: string; findings
     const sev = str(o.severity, 10).toLowerCase();
     const line = typeof o.line === "number" && Number.isInteger(o.line) && o.line > 0 ? o.line : null;
     findings.push({
-      severity: sev === "high" || sev === "medium" ? sev : "low",
+      severity: severityOf(sev),
       path: str(o.path, 500),
       line,
       title,
@@ -208,9 +221,19 @@ async function setStage(env: Bindings, reviewId: string, stage: string, progress
   await progress({ review: reviewId, stage, ...extra });
 }
 
+/** Runs `work`, reporting `data()` every minute until it ends: a long model call must not look like a dead worker. */
+async function keepingAlive<T>(progress: Progress, data: () => Record<string, unknown>, work: () => Promise<T>): Promise<T> {
+  const timer = setInterval(() => void progress(data()).catch(() => undefined), KEEPALIVE_MS);
+  try {
+    return await work();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
 async function loadPull(env: Bindings, review: ReviewRow): Promise<PullInfo> {
   const pr = await env.DB.prepare(
-    `SELECT p.id, p.repo_id, r.full_name AS repo, p.number, p.title, p.body, p.head_ref, p.base_ref, pj.context, u.login
+    `SELECT p.id, p.repo_id, r.full_name AS repo, p.number, p.title, p.body, p.head_ref, p.base_ref, p.files_sha, pj.context, u.login
        FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id JOIN projects pj ON pj.id = r.project_id, users u
       WHERE p.id = ?1 AND u.id = ?2`,
   )
@@ -272,18 +295,28 @@ async function runReview(env: Bindings, review: ReviewRow, progress: Progress) {
   const user = { id: review.requested_by, login: pr.login };
 
   await setStage(env, review.id, "reviewing", progress, { specs: specs.length, files: files.length });
-  const found = await ask(env, user, { model: FINDER_MODEL, system: FINDER_SYSTEM, prompt: finderPrompt(pr, files, specs), maxTokens: 16_000, timeoutMs: 9 * 60_000 });
+  const found = await keepingAlive(
+    progress,
+    () => ({ review: review.id, stage: "reviewing" }),
+    () => ask(env, user, { model: FINDER_MODEL, system: FINDER_SYSTEM, prompt: finderPrompt(pr, files, specs), maxTokens: 16_000, timeoutMs: 9 * 60_000 }),
+  );
   const answer = parseFinderAnswer(found.text);
   if (!answer) throw new AppError("upstream", "the reviewer's answer was not the expected JSON");
 
   await setStage(env, review.id, "refuting", progress, { findings: answer.findings.length });
   let checked = 0;
-  const verdicts = await inBatches(answer.findings, REFUTERS_AT_ONCE, async (f) => {
-    const out = await ask(env, user, { model: REFUTER_MODEL, system: REFUTER_SYSTEM, prompt: refuterPrompt(pr, f, files, specs), maxTokens: 2_000, timeoutMs: 5 * 60_000 });
-    checked++;
-    await progress({ review: review.id, stage: "refuting", findings: answer.findings.length, checked });
-    return parseVerdict(out.text);
-  });
+  const refuting = () => ({ review: review.id, stage: "refuting", findings: answer.findings.length, checked });
+  const verdicts = await keepingAlive(progress, refuting, () =>
+    inBatches(answer.findings, REFUTERS_AT_ONCE, async (f) => {
+      const out = await ask(env, user, { model: REFUTER_MODEL, system: REFUTER_SYSTEM, prompt: refuterPrompt(pr, f, files, specs), maxTokens: 2_000, timeoutMs: 5 * 60_000 });
+      checked++;
+      await progress(refuting());
+      return parseVerdict(out.text);
+    }),
+  );
+
+  // The review is of the commit whose files were read, which lags the head until a sync reads the new ones.
+  const reviewed = pr.files_sha ?? review.head_sha;
 
   // Replace whatever an earlier attempt of this job stored, all in one transaction.
   const statements = [env.DB.prepare("DELETE FROM findings WHERE review_id = ?1").bind(review.id)];
@@ -298,9 +331,9 @@ async function runReview(env: Bindings, review: ReviewRow, progress: Progress) {
   });
   statements.push(
     env.DB.prepare(
-      `UPDATE reviews SET state = 'succeeded', stage = 'done', walkthrough = ?2, backend = ?3, model = ?4, error = NULL,
+      `UPDATE reviews SET state = 'succeeded', stage = 'done', walkthrough = ?2, backend = ?3, model = ?4, head_sha = ?5, error = NULL,
          finished_at = ${NOW} WHERE id = ?1`,
-    ).bind(review.id, answer.walkthrough, found.backend, found.model),
+    ).bind(review.id, answer.walkthrough, found.backend, found.model, reviewed),
   );
   await env.DB.batch(statements);
   const kept = verdicts.filter((v) => v.real).length;

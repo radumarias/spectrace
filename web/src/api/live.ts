@@ -80,13 +80,14 @@ const REVIEW_KIND = "review";
 
 /**
  * Agent review events: a new stage is written straight into the review on
- * screen (no request), and the end of the job reads the result once.
+ * screen (no request); the start and the end of the job read the review once.
  */
 function onReview(qc: QueryClient, projectId: string, ev: JobEvent) {
   const { review, stage } = ev.data;
   if (ev.event === "progress" && typeof review === "string" && typeof stage === "string" && stage !== "done") {
     qc.setQueriesData<AgentReview | null>({ queryKey: agentReviewKeys.all(projectId) }, (r) => (r?.id === review ? { ...r, state: "running", stage } : r));
-  } else if (ev.event === "succeeded" || ev.event === "failed") {
+  } else if (ev.event === "queued" || ev.event === "started" || ev.event === "succeeded" || ev.event === "failed") {
+    // A review started elsewhere (another device) is not on screen yet; an ended one is read once.
     void qc.invalidateQueries({ queryKey: agentReviewKeys.all(projectId) });
   }
 }
