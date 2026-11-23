@@ -11,11 +11,17 @@ const PROJECT = {
   id: "p1", name: "Shop app", context: "", created_at: "x", updated_at: "x",
   repos: [{ id: "r1", github_repo_id: null, full_name: "acme/shop", default_branch: "main", index_state: "ready" }],
 };
+/** The server's gates, from a short list of what is open. */
+const gates = (open: string[] = []) =>
+  [["review", "Agent review finished"], ["findings", "No open high or medium findings"], ["mapping", "Every changed file mapped to a spec"], ["tests", "Tests pass"], ["approval", "Your approval · 1/1"]].map(([id, label]) => ({
+    id, label, status: id === "mapping" ? "unchecked" : open.includes(id!) ? "open" : "pass",
+  }));
+
 const PULL = {
   id: "pr-1", repo: "acme/shop", number: 58, title: "Checkout: show decline reason inline", author: "ana", state: "open", draft: false,
   needsYou: true, testsTotal: 0, testsPassed: 0, testsFailed: 0, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
   additions: 36, deletions: 6, changedFiles: 2, createdAt: "x", updatedAt: "x", mergedAt: null, syncedAt: "x",
-  body: "The declined screen shows why the card was declined.", headSha: "abc", checks: [], checksState: "none",
+  body: "The declined screen shows why the card was declined.", headSha: "abc", checks: [], checksState: "none", gates: gates(),
   files: [
     { path: "src/checkout/Declined.tsx", status: "modified", previousPath: null, additions: 31, deletions: 6 },
     { path: "src/checkout/Declined.test.tsx", status: "added", previousPath: null, additions: 5, deletions: 0 },
@@ -272,13 +278,14 @@ it("reconnects with a growing wait and catches up on what it missed", async () =
 });
 
 it("shows the gates, the review card and the context the reviewer would use", async () => {
-  server({ ...PULL, checksState: "failing" });
+  server({ ...PULL, checksState: "failing", gates: gates(["review", "findings", "tests", "approval"]).map((g) => (g.id === "approval" ? { ...g, label: "Your approval · 0/1" } : g)) });
   const user = userEvent.setup();
   at("/pr/pr-1");
   expect(await screen.findByText("No agent review yet")).toBeTruthy();
   expect(screen.getByText("○ Tests pass")).toBeTruthy();
   expect(screen.getByText(/Your approval · 0\/1/)).toBeTruthy();
-  expect(screen.getByText("2 gates open")).toBeTruthy();
+  expect(screen.getByText("4 gates open")).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Merge PR" }) as HTMLButtonElement).disabled).toBe(true); // a named gate is open
   expect(screen.getByText("Edit context").getAttribute("href")).toBe("/project");
   await user.click(screen.getByRole("tab", { name: "Findings" }));
   expect(screen.getByText("No agent review yet")).toBeTruthy();
@@ -301,7 +308,7 @@ it("starts an agent review and shows its first stage", async () => {
 });
 
 it("shows a finished review: walkthrough, findings and the review gates", async () => {
-  server(PULL, 200, false, REVIEW);
+  server({ ...PULL, gates: gates(["findings"]) }, 200, false, REVIEW);
   const user = userEvent.setup();
   at("/pr/pr-1");
   expect(await screen.findByText("declined")).toBeTruthy();
@@ -316,7 +323,7 @@ it("shows a finished review: walkthrough, findings and the review gates", async 
 });
 
 it("offers to run again when the review is of an older commit", async () => {
-  server(PULL, 200, false, { ...REVIEW, headSha: "old" });
+  server({ ...PULL, gates: gates(["review", "findings"]) }, 200, false, { ...REVIEW, headSha: "old" });
   at("/pr/pr-1");
   expect(await screen.findByText("New commits since the agent review")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Run agent review again" })).toBeTruthy();

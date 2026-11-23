@@ -23,21 +23,9 @@ function testsLabel(p: Pull): string {
 
 type Gate = { label: string; ok: boolean; checked: boolean };
 
-/**
- * The merge gates of the prototype. Tests and approval are always known; the
- * review gates count once an agent review of the head commit finished, and
- * spec mapping waits for that feature. Unchecked gates do not hold the merge back.
- */
-function gatesOf(p: Pull, approved: boolean, review: AgentReview | null | undefined): Gate[] {
-  const reviewed = review?.state === "succeeded" && review.headSha === p.headSha;
-  const serious = reviewed ? review.findings.filter((f) => f.severity !== "low").length : 0;
-  return [
-    { label: "Agent review finished", ok: reviewed, checked: reviewed },
-    { label: "No open high or medium findings", ok: reviewed && serious === 0, checked: reviewed },
-    { label: "Every changed file mapped to a spec", ok: false, checked: false },
-    { label: "Tests pass", ok: p.checksState === "passing" || p.checksState === "none", checked: true },
-    { label: `Your approval · ${approved ? 1 : 0}/1`, ok: approved, checked: true },
-  ];
+/** The merge gates come from the server (the core rules); the page only shows them. */
+function toGates(p: Pull): Gate[] {
+  return p.gates.map((g) => ({ label: g.label, ok: g.status === "pass", checked: g.status !== "unchecked" }));
 }
 
 function checkLine(c: Pull["checks"][number]): { tone: PillTone; label: string } {
@@ -76,7 +64,6 @@ export function PullDetail() {
   const { pullId } = useParams();
   const { project, isPending } = useCurrentProject();
   const pull = usePull(project?.id, pullId);
-  const reviews = usePullReviews(project?.id, pullId);
   const agent = useAgentReview(project?.id, pullId);
   const [tab, setTab] = useState("walk");
 
@@ -87,10 +74,8 @@ export function PullDetail() {
 
   const p = pull.data;
   const s = STATE[p.state];
-  const mine = reviews.data?.[0];
-  const approved = mine?.headSha === p.headSha && mine.verdict === "approved";
   const ar = agent.data;
-  const gates = gatesOf(p, approved, ar);
+  const gates = toGates(p);
   const done = ar?.state === "succeeded";
   const running = ar?.state === "queued" || ar?.state === "running";
   return (
@@ -410,7 +395,7 @@ function Actions({ projectId, pull: p, gates }: { projectId: string; pull: Pull;
             </Button>
           </>
         )}
-        <Button variant={p.state === "merged" ? "default" : "primary"} disabled={!open || p.draft || busy} onClick={doMerge}>
+        <Button variant={p.state === "merged" ? "default" : "primary"} disabled={!open || p.draft || busy || openGates > 0} onClick={doMerge}>
           {p.state === "merged" ? "Merged" : merge.isPending ? "Merging…" : "Merge PR"}
         </Button>
       </div>

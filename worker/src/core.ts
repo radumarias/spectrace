@@ -2,11 +2,11 @@
 // The generated files in ./wasm are git-ignored. wrangler and the Vite plugin
 // bundle the .wasm import as a precompiled module, so no network or fs is needed.
 import wasm from "./wasm/spectrace_core_bg.wasm";
-import { editSpec, initSync, isValidId, parseSpec, scanAnchors } from "./wasm/spectrace_core";
+import { editSpec, evaluateGates, initSync, isValidId, parseSpec, scanAnchors } from "./wasm/spectrace_core";
 
-export type { Anchor, AnchorClass, AnchorKind, Diagnostic, DiagnosticCode, Language, ParsedSpec, Spec, SpecEdit } from "./wasm/spectrace_core";
+export type { Anchor, AnchorClass, AnchorKind, Diagnostic, DiagnosticCode, Language, Gate, GateInput, GateStatus, ParsedSpec, Spec, SpecEdit } from "./wasm/spectrace_core";
 
 // Instantiated once per isolate, when this module is first imported.
 initSync({ module: wasm });
 
-export { editSpec, isValidId, parseSpec, scanAnchors };
+export { editSpec, evaluateGates, isValidId, parseSpec, scanAnchors };

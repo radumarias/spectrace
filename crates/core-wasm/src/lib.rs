@@ -15,6 +15,20 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TS_TYPES: &str = r#"
+export type GateStatus = "pass" | "open" | "unchecked";
+export interface Gate { id: "review" | "findings" | "mapping" | "tests" | "approval"; label: string; status: GateStatus }
+export interface GateInput {
+  reviewFinished: boolean;
+  openSeriousFindings: number;
+  checksTotal: number;
+  checksFailed: number;
+  checksPending: number;
+  approvals: number;
+  critical: boolean;
+  /** `null` while mapping files to specs is not available. */
+  filesMapped: boolean | null;
+}
+
 export type Language = "rust" | "typescript" | "python";
 export type AnchorKind = "spec" | "flow";
 export type AnchorClass = "code" | "test";
@@ -356,6 +370,15 @@ pub fn edit_spec(
 }
 
 /// Whether `id` is a valid step or requirement id (`anchor::is_valid_id`).
+/// The merge gates of a pull request (`gate::evaluate`), in the order the page lists them.
+#[wasm_bindgen(js_name = evaluateGates, unchecked_return_type = "Gate[]")]
+pub fn evaluate_gates(
+    #[wasm_bindgen(unchecked_param_type = "GateInput")] input: JsValue,
+) -> Result<JsValue, JsError> {
+    let input: spectrace_core::gate::GateInput = serde_wasm_bindgen::from_value(input)?;
+    Ok(to_js(&spectrace_core::gate::evaluate(&input))?)
+}
+
 #[wasm_bindgen(js_name = isValidId)]
 pub fn is_valid_id(id: &str) -> bool {
     anchor::is_valid_id(id)
