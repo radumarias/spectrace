@@ -9,3 +9,4 @@ Format: [docs/spec-format.md](../../docs/spec-format.md). Nothing here is compil
 | `proposed/checkout-with-refunds.md` | The same flow with the refund step PR #142 adds. Diff it against `spec/checkout.md` to test spec-change review. |
 | `src/` | Rust with `#[spec]` and `@flow` anchors. |
 | `tests/checkout.rs` | Tests anchored to requirements. `checkout.details` has none on purpose. |
+| `devpage-requirements.yml` | The devpage requirements suite that reads the same test anchors. |

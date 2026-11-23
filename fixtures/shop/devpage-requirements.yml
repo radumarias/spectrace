@@ -1,0 +1,12 @@
+# The devpage requirements suite for this fixture: the block a site's
+# devpage.yml puts under `extensions` so `devpage check` reads the same
+# #[spec] anchors spectrace does. See docs/spec-format.md, "Using spectrace
+# with devpage". crates/core/tests/devpage_anchors.rs reads `glob` and
+# `pattern` from here and checks devpage would find the same test anchors.
+requirements:
+  config:
+    tests:
+      - name: rust
+        glob: "tests/**/*.rs"
+        pattern: '#\[spec\("([^"]+)"\)\]'
+        run: "cargo +nightly test -- -Z unstable-options --format junit"
