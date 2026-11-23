@@ -12,8 +12,8 @@ import { installationFor, SYNC_KIND } from "../jobs/sync";
 import { Job, toJob } from "./jobs";
 import { requireProjectOwner } from "./projects";
 
-const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
-const PullParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "pullId", in: "path" } });
+export const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
+export const PullParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "pullId", in: "path" } });
 
 const Pull = z
   .object({

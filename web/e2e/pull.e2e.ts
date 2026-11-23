@@ -107,7 +107,7 @@ test("an agent review runs and its findings appear", async ({ page }) => {
   await page.routeWebSocket(/\/api\/projects\/p1\/events/, (ws) => {
     newest = ws;
   });
-  const progress = (stage: string) => newest!.send(JSON.stringify({ id: ++seq, projectId: "p1", jobId: "job-9", event: "progress", data: { review: "rv-1", stage }, createdAt: "2026-11-22T10:00:01Z" }));
+  const progress = (stage: string) => newest!.send(JSON.stringify({ id: ++seq, projectId: "p1", jobId: "job-9", event: "progress", data: { kind: "review", review: "rv-1", stage }, createdAt: "2026-11-22T10:00:01Z" }));
   await page.addInitScript(() => localStorage.setItem("spectrace-proj", "p1"));
   const errors = trackErrors(page);
 
@@ -135,7 +135,7 @@ test("an agent review runs and its findings appear", async ({ page }) => {
       suggestedFix: "Map gateway codes to the copy in spec § Declined payment.",
     }],
   };
-  newest!.send(JSON.stringify({ id: ++seq, projectId: "p1", jobId: "job-9", event: "succeeded", data: { attempt: 1 }, createdAt: "2026-11-22T10:03:00Z" }));
+  newest!.send(JSON.stringify({ id: ++seq, projectId: "p1", jobId: "job-9", event: "succeeded", data: { kind: "review", attempt: 1 }, createdAt: "2026-11-22T10:03:00Z" }));
 
   await expect(page.getByRole("tab", { name: "Findings · 1" })).toBeVisible();
   await expect(page.getByText("The reason is shown raw from the gateway")).toBeVisible();

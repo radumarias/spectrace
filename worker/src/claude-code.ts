@@ -86,7 +86,8 @@ export async function runClaudeCode(env: Bindings, req: ClaudeCodeRequest): Prom
   const body = (await res.json().catch(() => null)) as (ClaudeCodeResult & { error?: { code?: string; message?: string } }) | null;
   if (!res.ok || !body || typeof body.result !== "string") {
     log("error", "claude code run failed", { status: res.status, code: body?.error?.code, detail: body?.error?.message, model: req.model }, env.LOG_FORMAT);
-    if (res.status === 503) throw new AppError("not_configured", "Claude Code has no credentials in its container");
+    // Only the container's own "no credentials" answer; any other 503 (a container still starting) may pass, so it is retried.
+    if (res.status === 503 && body?.error?.code === "not_configured") throw new AppError("not_configured", "Claude Code has no credentials in its container");
     throw new AppError("upstream", `Claude Code answered ${res.status}`);
   }
   if (body.isError) {
@@ -119,7 +120,7 @@ export interface AskResult {
  */
 export async function ask(env: Bindings, user: { id: string; login: string }, req: AskRequest): Promise<AskResult> {
   if (subscriptionFor(env, user.login)) {
-    const out = await runClaudeCode(env, { prompt: req.prompt, model: req.model, system: req.system, maxTurns: 1, ...(req.timeoutMs ? { timeoutMs: req.timeoutMs } : {}) });
+    const out = await runClaudeCode(env, { prompt: req.prompt, model: req.model, system: req.system, maxTurns: 1, timeoutMs: req.timeoutMs });
     return { backend: "claude-code", model: out.model ?? req.model, text: out.result.trim() };
   }
   const own = env.SECRETS_KEY ? await userKey(env, user.id) : null;

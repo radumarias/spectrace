@@ -211,9 +211,28 @@ describe("review job", () => {
     expect(body.review).toMatchObject({ state: "failed", findings: [] });
     expect(body.review!.error).toMatch(/not the expected JSON/);
   });
+
+  it("records the commit whose files it read when they lag the head", async () => {
+    const s = await seed();
+    env.ANTHROPIC_API_KEY = "sk-ant-test";
+    await env.DB.prepare("UPDATE pull_requests SET files_sha = 'sha8' WHERE id = ?1").bind(s.pullId).run();
+    const { jobId } = await queued(s);
+    await deliver(jobId);
+    const body = (await (await call(s)).json()) as ReviewBody & { review: { headSha: string } };
+    expect(body.review).toMatchObject({ state: "succeeded", headSha: "sha8" });
+  });
 });
 
 describe("agent review routes", () => {
+  it("shows a review whose job died without a word as failed", async () => {
+    const s = await seed();
+    const { jobId } = await queued(s);
+    await env.DB.prepare("UPDATE reviews SET state = 'running', stage = 'reviewing' WHERE job_id = ?1").bind(jobId).run();
+    await env.DB.prepare("UPDATE jobs SET state = 'failed', error = 'dead-lettered' WHERE id = ?1").bind(jobId).run();
+    const body = (await (await call(s)).json()) as ReviewBody;
+    expect(body.review).toMatchObject({ state: "failed", stage: "failed", error: "the review stopped before it finished" });
+  });
+
   it("answers null before any review, and 404 for a PR of another project", async () => {
     const s = await seed();
     expect(await (await call(s)).json()).toEqual({ review: null });
@@ -242,11 +261,17 @@ describe("parsing model answers", () => {
     expect(parseJsonObject('Sure! {"a": 1} hope that helps')).toEqual({ a: 1 });
     expect(parseJsonObject('```json\n{"a": {"b": 2}}\n```')).toEqual({ a: { b: 2 } });
     expect(parseJsonObject("no json")).toBeNull();
+    // A fenced snippet inside one of the answer's strings is not the answer.
+    const inner = JSON.stringify({ walkthrough: 'Adds:\n```json\n{"retries": 3}\n```', findings: [] });
+    expect(parseJsonObject(inner)).toEqual(JSON.parse(inner));
+    expect(parseFinderAnswer('{"retries": 3}')).toBeNull();
   });
 
   it("cleans findings and refuses unreadable verdicts", () => {
     const out = parseFinderAnswer(JSON.stringify({ walkthrough: "w", findings: [{ severity: "CRITICAL", title: "t", line: "x" }, { severity: "high" }] }));
-    expect(out).toEqual({ walkthrough: "w", findings: [{ severity: "low", path: "", line: null, title: "t", body: "", suggestedFix: "", spec: null }] });
+    expect(out).toEqual({ walkthrough: "w", findings: [{ severity: "high", path: "", line: null, title: "t", body: "", suggestedFix: "", spec: null }] });
+    const sev = (severity: string) => parseFinderAnswer(JSON.stringify({ findings: [{ severity, title: "t" }] }))!.findings[0]!.severity;
+    expect([sev("Blocker"), sev("minor"), sev("whatever")]).toEqual(["high", "low", "medium"]);
     expect(parseVerdict("maybe")).toEqual({ real: false, reason: "The refuter's answer could not be read." });
     expect(parseVerdict('{"real": "yes"}').real).toBe(false);
   });

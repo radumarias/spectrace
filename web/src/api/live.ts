@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { boardKeys } from "./boards";
-import { pullKeys } from "./pulls";
+import { agentReviewKeys, pullKeys, type AgentReview } from "./pulls";
 import { keys, type Project } from "./queries";
 import { reqKeys } from "./requirements";
 
@@ -73,7 +73,23 @@ const refreshProjects = (qc: QueryClient) => void qc.invalidateQueries({ queryKe
 /** Everything a page shows about this project's pull requests. */
 function refreshPulls(qc: QueryClient, projectId: string) {
   void qc.invalidateQueries({ queryKey: pullKeys.all(projectId) });
-  for (const k of ["pull", "pull-diff", "pull-reviews", "agent-review"]) void qc.invalidateQueries({ queryKey: [k, projectId] });
+  for (const k of ["pull", "pull-diff", "pull-reviews"]) void qc.invalidateQueries({ queryKey: [k, projectId] });
+}
+
+const REVIEW_KIND = "review";
+
+/**
+ * Agent review events: a new stage is written straight into the review on
+ * screen (no request); the start and the end of the job read the review once.
+ */
+function onReview(qc: QueryClient, projectId: string, ev: JobEvent) {
+  const { review, stage } = ev.data;
+  if (ev.event === "progress" && typeof review === "string" && typeof stage === "string" && stage !== "done") {
+    qc.setQueriesData<AgentReview | null>({ queryKey: agentReviewKeys.all(projectId) }, (r) => (r?.id === review ? { ...r, state: "running", stage } : r));
+  } else if (ev.event === "queued" || ev.event === "started" || ev.event === "succeeded" || ev.event === "failed") {
+    // A review started elsewhere (another device) is not on screen yet; an ended one is read once.
+    void qc.invalidateQueries({ queryKey: agentReviewKeys.all(projectId) });
+  }
 }
 
 /** Someone (you, on any device) asked the coordinator something and it is still working on it. */
@@ -148,20 +164,20 @@ export function useProjectLive(project: Project | undefined) {
       if (!id) return;
       if (ev.event.startsWith("studio.")) onStudio(qc, id, ev);
       else if (ev.event === "pr.updated" || ev.event === "repo.pushed") refreshPulls(qc, id);
-      else if (ev.event === "progress" && typeof ev.data.review === "string") void qc.invalidateQueries({ queryKey: ["agent-review", id] }); // a review moved to its next stage
+      else if (ev.data.kind === REVIEW_KIND) onReview(qc, id, ev);
       else {
         refreshProjects(qc);
         if (ev.event === "succeeded") {
           refreshPulls(qc, id); // a sync that finished brings new and changed PRs
           void qc.invalidateQueries({ queryKey: ["specs", id] }); // and an index brings new specs
         }
-        if (ev.event === "failed") void qc.invalidateQueries({ queryKey: ["agent-review", id] }); // a review that gave up says why
       }
     },
     () => {
       if (!id) return;
       refreshProjects(qc);
       refreshPulls(qc, id);
+      void qc.invalidateQueries({ queryKey: agentReviewKeys.all(id) }); // progress missed while away
       // Studio events are not replayed: read what may have changed while away.
       qc.setQueryData(studioKey(id), null);
       for (const k of [["coordinator", id], boardKeys.all(id), reqKeys.all(id)]) void qc.invalidateQueries({ queryKey: k });

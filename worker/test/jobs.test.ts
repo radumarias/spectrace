@@ -288,7 +288,7 @@ describe("project event stream", () => {
     const got = await waitFor(3);
     expect(got.map((f) => f.event)).toEqual(["started", "progress", "succeeded"]);
     expect(got.every((f) => f.projectId === project && f.jobId === id)).toBe(true);
-    expect(got[1]?.data).toEqual({ pct: 50 });
+    expect(got[1]?.data).toEqual({ kind: "test.stream", pct: 50 }); // every event names its job kind;
     expect(got.map((f) => f.id)).toEqual([...got.map((f) => f.id)].sort((a, b) => a - b));
     expect(otherClient.frames).toHaveLength(0);
     ws.close();

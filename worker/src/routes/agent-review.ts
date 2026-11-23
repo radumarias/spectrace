@@ -8,10 +8,9 @@ import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
 import { enqueueJob } from "../jobs/queue";
 import { REVIEW_KIND } from "../jobs/review";
+import { NOW } from "../pulls";
 import { requireProjectOwner } from "./projects";
-
-const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
-const PullParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "pullId", in: "path" } });
+import { ProjectParam, PullParam } from "./pulls";
 
 const Finding = z
   .object({
@@ -77,6 +76,9 @@ const latest = createRoute({
   },
 });
 
+/** A job that has reported nothing for this long is taken as dead (its progress keeps it fresh every minute). */
+const JOB_ALIVE = "j.state IN ('queued', 'running') AND j.updated_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-10 minutes')";
+
 interface ReviewRow {
   id: string;
   pull_request_id: string;
@@ -107,7 +109,8 @@ interface FindingRow {
 const RANK = { high: 0, medium: 1, low: 2 } as const;
 
 async function toReview(env: Bindings, r: ReviewRow): Promise<z.infer<typeof AgentReview>> {
-  const { results } = await env.DB.prepare("SELECT id, severity, path, line, title, body, suggested_fix, spec, refuted FROM findings WHERE review_id = ?1 ORDER BY id").bind(r.id).all<FindingRow>();
+  // Findings are stored together with the success, so only a finished review has any.
+  const { results } = r.state !== "succeeded" ? { results: [] as FindingRow[] } : await env.DB.prepare("SELECT id, severity, path, line, title, body, suggested_fix, spec, refuted FROM findings WHERE review_id = ?1 ORDER BY id").bind(r.id).all<FindingRow>();
   const kept = results.filter((f) => f.refuted === 0).sort((a, b) => RANK[a.severity] - RANK[b.severity] || a.id - b.id);
   return {
     id: r.id,
@@ -143,10 +146,12 @@ export function registerAgentReview(app: OpenAPIHono<AppEnv>) {
     await requireProjectOwner(c.env.DB, user.id, projectId);
     const pr = await pullOf(c.env.DB, projectId, pullId);
 
-    // A review of this commit that is still under way covers the request (a stale one, over 30 minutes, does not).
+    // A review of this commit whose job is still under way covers the request. Its job reports
+    // progress at least every minute, so one silent for 10 minutes is stale (the same rule as a sync).
     const running = await c.env.DB.prepare(
-      `SELECT * FROM reviews WHERE pull_request_id = ?1 AND head_sha = ?2 AND state IN ('queued', 'running')
-         AND created_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-30 minutes') ORDER BY created_at DESC LIMIT 1`,
+      `SELECT r.* FROM reviews r JOIN jobs j ON j.id = r.job_id
+        WHERE r.pull_request_id = ?1 AND r.head_sha = ?2
+          AND ${JOB_ALIVE} ORDER BY r.created_at DESC LIMIT 1`,
     )
       .bind(pr.id, pr.head_sha)
       .first<ReviewRow>();
@@ -158,7 +163,7 @@ export function registerAgentReview(app: OpenAPIHono<AppEnv>) {
     try {
       jobId = (await enqueueJob(c.env, projectId, REVIEW_KIND, id, 2)).id;
     } catch (error) {
-      await c.env.DB.prepare("UPDATE reviews SET state = 'failed', stage = 'failed', error = 'could not be queued', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1").bind(id).run();
+      await c.env.DB.prepare(`UPDATE reviews SET state = 'failed', stage = 'failed', error = 'could not be queued', finished_at = ${NOW} WHERE id = ?1`).bind(id).run();
       throw error;
     }
     const row = await c.env.DB.prepare("UPDATE reviews SET job_id = ?2 WHERE id = ?1 RETURNING *").bind(id, jobId).first<ReviewRow>();
@@ -170,7 +175,17 @@ export function registerAgentReview(app: OpenAPIHono<AppEnv>) {
     const { projectId, pullId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
     const pr = await pullOf(c.env.DB, projectId, pullId);
-    const row = await c.env.DB.prepare("SELECT * FROM reviews WHERE pull_request_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1").bind(pr.id).first<ReviewRow>();
-    return c.json({ review: row ? await toReview(c.env, row) : null }, 200);
+    // A review whose job ended or went silent without saying so (dead-lettered, or its Worker was stopped) shows as failed, so it can be run again.
+    const row = await c.env.DB.prepare(
+      `SELECT r.*, (r.job_id IS NOT NULL AND NOT COALESCE(${JOB_ALIVE}, 0)) AS stopped FROM reviews r LEFT JOIN jobs j ON j.id = r.job_id
+        WHERE r.pull_request_id = ?1 ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1`,
+    )
+      .bind(pr.id)
+      .first<ReviewRow & { stopped: number }>();
+    if (!row) return c.json({ review: null }, 200);
+    const { stopped, ...review } = row;
+    const live = review.state === "queued" || review.state === "running";
+    const shown: ReviewRow = stopped && live ? { ...review, state: "failed", stage: "failed", error: "the review stopped before it finished" } : review;
+    return c.json({ review: await toReview(c.env, shown) }, 200);
   });
 }

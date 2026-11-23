@@ -53,7 +53,9 @@ export interface JobMessage {
 }
 
 /** Append an event to the job log and push it to the project's hub. */
-export async function emit(env: Bindings, job: Pick<JobRow, "id" | "project_id">, event: string, data: Record<string, unknown> = {}): Promise<JobEvent> {
+export async function emit(env: Bindings, job: Pick<JobRow, "id" | "project_id"> & { kind?: string }, event: string, data: Record<string, unknown> = {}): Promise<JobEvent> {
+  // Every event of a job says its kind, so browsers know what to refresh.
+  if (job.kind) data = { kind: job.kind, ...data };
   const row = await env.DB.prepare(
     "INSERT INTO job_events (project_id, job_id, event, data) VALUES (?1, ?2, ?3, ?4) RETURNING id, project_id, job_id, event, data, created_at",
   )
@@ -77,7 +79,7 @@ export async function enqueueJob(env: Bindings, projectId: string, kind: string,
     .bind(id, projectId, kind, target, maxAttempts)
     .first<JobRow>();
   if (!row) throw new AppError("internal", "job insert returned no row");
-  await emit(env, row, "queued", { kind: row.kind, target: row.target });
+  await emit(env, row, "queued", { target: row.target });
   try {
     await env.JOBS.send({ jobId: id });
   } catch (cause) {
@@ -139,15 +141,15 @@ async function processOne(env: Bindings, msg: Message<JobMessage>): Promise<void
     return;
   }
 
-  await emit(env, job, "started", { attempt: job.attempts, kind: job.kind, target: job.target });
+  await emit(env, job, "started", { attempt: job.attempts, target: job.target });
 
   const handler = handlers.get(job.kind);
   try {
     if (!handler) throw new PermanentError(`no handler for kind "${job.kind}"`);
-    await handler(job, { env, progress: (data) => emit(env, job, "progress", data).then(() => undefined) });
+    await handler(job, { env, progress: (data) => heartbeat(env, job).then(() => emit(env, job, "progress", data)).then(() => undefined) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const final = error instanceof PermanentError || job.attempts >= job.max_attempts;
+    const message = errorMessage(error);
+    const final = isFinalFailure(job, error);
     if (final) {
       if (await finish(env, job, "failed", message)) await emit(env, job, "failed", { attempt: job.attempts, error: message });
       msg.ack();
@@ -165,6 +167,23 @@ async function processOne(env: Bindings, msg: Message<JobMessage>): Promise<void
 
 /** A failure that retrying cannot fix. */
 export class PermanentError extends Error {}
+
+export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/**
+ * Whether this failure ends the job: retrying cannot fix it (a PermanentError,
+ * or nothing is configured or found), or it was the last attempt. Handlers use
+ * it to mark their own rows failed exactly when the queue gives up.
+ */
+export function isFinalFailure(job: Pick<JobRow, "attempts" | "max_attempts">, error: unknown): boolean {
+  const permanent = error instanceof PermanentError || (error instanceof AppError && (error.code === "not_configured" || error.code === "not_found"));
+  return permanent || job.attempts >= job.max_attempts;
+}
+
+/** Keeps a running job's lease: a job that reports progress is alive, however long one step takes. */
+async function heartbeat(env: Bindings, job: Pick<JobRow, "id">): Promise<void> {
+  await env.DB.prepare("UPDATE jobs SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?1 AND state = 'running'").bind(job.id).run();
+}
 
 /** Dead-letter queue: the consumer could not finish the message at all. */
 async function processDead(env: Bindings, msg: Message<JobMessage>): Promise<void> {

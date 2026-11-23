@@ -10,7 +10,7 @@ import { appConfigFromEnv, appJwt, ghHeaders, installationToken, linkRepoInstall
 import { log } from "../log";
 import type { RepoIndex } from "../specs";
 import { readTarGz } from "../tarball";
-import { enqueueJob, PermanentError, type JobContext, type JobRow } from "./queue";
+import { enqueueJob, errorMessage, isFinalFailure, PermanentError, type JobContext, type JobRow } from "./queue";
 import { SYNC_KIND } from "./sync";
 
 export const INDEX_KIND = "index";
@@ -221,9 +221,8 @@ export async function indexRepo(job: JobRow, ctx: JobContext): Promise<void> {
   try {
     await readRepo(job, ctx, repo);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
     // Leave "indexing" while the queue will try again; show "failed" once it will not.
-    if (error instanceof PermanentError || job.attempts >= job.max_attempts) await markFailed(ctx.env, repo.id, message);
+    if (isFinalFailure(job, error)) await markFailed(ctx.env, repo.id, errorMessage(error));
     throw error;
   }
 }
