@@ -31,7 +31,7 @@ function mockGithub() {
 }
 
 let n = 0;
-async function seed(opts: { draft?: number; state?: string; installation?: boolean } = {}) {
+async function seed(opts: { draft?: number; state?: string; installation?: boolean; gatesPass?: boolean } = {}) {
   const login = `actions-${++n}-${crypto.randomUUID().slice(0, 8)}`;
   const userId = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO users (id, github_id, login) VALUES (?1, ?2, ?3)").bind(userId, 4_000_000 + n, login).run();
@@ -54,6 +54,11 @@ async function seed(opts: { draft?: number; state?: string; installation?: boole
   )
     .bind(pullId, repoId, 20_000 + n, opts.state ?? "open", opts.draft ?? 0)
     .run();
+  if (opts.gatesPass !== false) {
+    // Gates in order: a finished review of sha1 with nothing serious, and one GitHub approval of sha1. No CI runs means tests pass.
+    await env.DB.prepare("INSERT INTO reviews (id, pull_request_id, requested_by, head_sha, state) VALUES (?1, ?2, ?3, 'sha1', 'succeeded')").bind(`rv-${pullId}`, pullId, userId).run();
+    await env.DB.prepare("INSERT INTO pr_reviews (pull_request_id, github_review_id, reviewer_login, state, commit_sha, submitted_at) VALUES (?1, 1, 'octo', 'approved', 'sha1', '2026-11-10T00:00:00Z')").bind(pullId).run();
+  }
   return { userId, cookie: `spectrace_session=${login}`, projectId, pullId, base: `/api/projects/${projectId}/pulls/${pullId}` };
 }
 type Seed = Awaited<ReturnType<typeof seed>>;
@@ -171,6 +176,40 @@ describe("POST .../merge", () => {
     expect((await post(s, "/merge", { method: "rebase" })).status).toBe(200);
     expect(sent[0]?.body).toMatchObject({ merge_method: "rebase" });
     expect((await post(await seed(), "/merge", { method: "fast-forward" })).status).toBe(400);
+  });
+
+  it("names the gate that is open and does not call GitHub", async () => {
+    const gateOf = async (s: Seed) => (await (await post(s, "/merge")).json()) as { error: { code: string; message: string } };
+    const s1 = await seed({ gatesPass: false });
+    expect(await gateOf(s1)).toEqual({ error: { code: "conflict", message: "conflict: gate open: Agent review finished" } });
+
+    // A finished review with a serious finding.
+    await env.DB.prepare("INSERT INTO reviews (id, pull_request_id, requested_by, head_sha, state) VALUES ('rv-a', ?1, ?2, 'sha1', 'succeeded')").bind(s1.pullId, s1.userId).run();
+    await env.DB.prepare("INSERT INTO findings (review_id, severity, title) VALUES ('rv-a', 'high', 'x'), ('rv-a', 'medium', 'dropped')").run();
+    await env.DB.prepare("UPDATE findings SET refuted = 1 WHERE title = 'dropped'").run();
+    expect((await gateOf(s1)).error.message).toBe("conflict: gate open: No open high or medium findings");
+    await env.DB.prepare("UPDATE findings SET refuted = 1 WHERE review_id = 'rv-a'").run();
+
+    // A failing check, then a running one.
+    const repo = (await env.DB.prepare("SELECT repo_id FROM pull_requests WHERE id = ?1").bind(s1.pullId).first<{ repo_id: string }>())!.repo_id;
+    await env.DB.prepare("INSERT INTO pr_check_runs (repo_id, github_check_run_id, head_sha, name, status, conclusion) VALUES (?1, 1, 'sha1', 'ci', 'completed', 'failure')").bind(repo).run();
+    expect((await gateOf(s1)).error.message).toBe("conflict: gate open: Tests pass");
+    await env.DB.prepare("UPDATE pr_check_runs SET status = 'in_progress', conclusion = NULL").run();
+    expect((await gateOf(s1)).error.message).toBe("conflict: gate open: Tests pass");
+    await env.DB.prepare("UPDATE pr_check_runs SET status = 'completed', conclusion = 'success'").run();
+
+    // Nobody approved yet: an approval of an older commit does not count, one of this commit does.
+    expect((await gateOf(s1)).error.message).toBe("conflict: gate open: Your approval · 0/1");
+    await env.DB.prepare("INSERT INTO pr_reviews (pull_request_id, github_review_id, reviewer_login, state, commit_sha, submitted_at) VALUES (?1, 5, 'ana', 'approved', 'old', 'x')").bind(s1.pullId).run();
+    expect((await gateOf(s1)).error.message).toBe("conflict: gate open: Your approval · 0/1");
+    expect(sent).toEqual([]);
+    await env.DB.prepare("INSERT INTO pr_reviews (pull_request_id, github_review_id, reviewer_login, state, commit_sha, submitted_at) VALUES (?1, 6, 'ana', 'approved', 'sha1', 'x')").bind(s1.pullId).run();
+    expect((await post(s1, "/merge")).status).toBe(200);
+
+    // Detail lists the gates for a PR that is ready.
+    const ready = await seed();
+    const detail = (await (await call(ready.base, ready.cookie)).json()) as { gates: { id: string; status: string }[] };
+    expect(detail.gates.map((g) => `${g.id}:${g.status}`)).toEqual(["review:pass", "findings:pass", "mapping:unchecked", "tests:pass", "approval:pass"]);
   });
 
   it("refuses drafts and PRs that are not open without calling GitHub", async () => {
