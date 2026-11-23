@@ -3326,6 +3326,8 @@ export interface components {
             }[];
         };
         PullDetail: components["schemas"]["Pull"] & {
+            /** @description Merge gates, from the core rules. The merge call refuses while one is open. */
+            gates: components["schemas"]["PullGate"][];
             body: string;
             headSha: string;
             files: components["schemas"]["PullFile"][];
@@ -3336,6 +3338,16 @@ export interface components {
              * @enum {string}
              */
             checksState: "none" | "pending" | "passing" | "failing";
+        };
+        PullGate: {
+            /** @enum {string} */
+            id: "review" | "findings" | "mapping" | "tests" | "approval";
+            label: string;
+            /**
+             * @description `open` holds the merge back; `unchecked` is not known yet and does not.
+             * @enum {string}
+             */
+            status: "pass" | "open" | "unchecked";
         };
         PullFile: {
             path: string;

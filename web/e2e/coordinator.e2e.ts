@@ -10,6 +10,13 @@ const PULL = {
   needsYou: true, testsTotal: 1, testsPassed: 0, testsFailed: 1, headRef: "ana/decline-reason", baseRef: "main", htmlUrl: "https://github.com/acme/shop/pull/58",
   additions: 36, deletions: 6, changedFiles: 1, createdAt: "2026-11-21T10:00:00Z", updatedAt: "2026-11-21T11:00:00Z", mergedAt: null,
   syncedAt: "2026-11-21T11:05:00Z", headSha: "abc123", checks: [], checksState: "failing", body: "", files: [],
+  gates: [
+    { id: "review", label: "Agent review finished", status: "pass" },
+    { id: "findings", label: "No open critical findings", status: "pass" },
+    { id: "mapping", label: "Every changed file mapped to a spec", status: "unchecked" },
+    { id: "tests", label: "Tests pass", status: "open" },
+    { id: "approval", label: "Approved", status: "open" },
+  ],
 };
 const msg = (id: string, role: "user" | "coordinator", text: string, extra: Record<string, unknown> = {}) => ({ id, role, text, tools: [], actions: [], ran: [], createdAt: "2026-11-22T13:00:00Z", ...extra });
 

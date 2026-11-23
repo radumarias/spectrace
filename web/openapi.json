@@ -456,6 +456,13 @@
           {
             "type": "object",
             "properties": {
+              "gates": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PullGate"
+                },
+                "description": "Merge gates, from the core rules. The merge call refuses while one is open."
+              },
               "body": {
                 "type": "string"
               },
@@ -487,6 +494,7 @@
               }
             },
             "required": [
+              "gates",
               "body",
               "headSha",
               "files",
@@ -494,6 +502,38 @@
               "checksState"
             ]
           }
+        ]
+      },
+      "PullGate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "review",
+              "findings",
+              "mapping",
+              "tests",
+              "approval"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "open",
+              "unchecked"
+            ],
+            "description": "`open` holds the merge back; `unchecked` is not known yet and does not."
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "status"
         ]
       },
       "PullFile": {

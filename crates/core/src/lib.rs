@@ -3,6 +3,7 @@
 
 pub mod anchor;
 pub mod diag;
+pub mod gate;
 pub mod spec;
 pub mod write;
 

@@ -6,6 +6,7 @@ import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
 import { appConfigFromEnv, ghHeaders, installationToken } from "../github-app";
 import { checkRunsOf, checksState } from "../checks";
+import { pullGates } from "../gates";
 import { enqueueJob, type JobRow } from "../jobs/queue";
 import { installationFor, SYNC_KIND } from "../jobs/sync";
 import { Job, toJob } from "./jobs";
@@ -61,7 +62,16 @@ const CheckRun = z
   })
   .openapi("CheckRun");
 
+const PullGate = z
+  .object({
+    id: z.enum(["review", "findings", "mapping", "tests", "approval"]),
+    label: z.string(),
+    status: z.enum(["pass", "open", "unchecked"]).openapi({ description: "`open` holds the merge back; `unchecked` is not known yet and does not." }),
+  })
+  .openapi("PullGate");
+
 const PullDetail = Pull.extend({
+  gates: z.array(PullGate).openapi({ description: "Merge gates, from the core rules. The merge call refuses while one is open." }),
   body: z.string(),
   headSha: z.string(),
   files: z.array(PullFile),
@@ -293,11 +303,11 @@ async function writablePull(c: Context<AppEnv>, projectId: string, pullId: strin
   const user = await requireUser(c);
   await requireProjectOwner(c.env.DB, user.id, projectId);
   const row = await c.env.DB.prepare(
-    `SELECT p.id, p.number, p.state, p.draft, p.head_sha, p.merged_at, r.full_name FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id
+    `SELECT p.id, p.repo_id, p.number, p.state, p.draft, p.head_sha, p.merged_at, r.full_name FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id
       WHERE r.project_id = ?1 AND p.id = ?2`,
   )
     .bind(projectId, pullId)
-    .first<{ id: string; number: number; state: string; draft: number; head_sha: string; merged_at: string | null; full_name: string }>();
+    .first<{ id: string; repo_id: string; number: number; state: string; draft: number; head_sha: string; merged_at: string | null; full_name: string }>();
   if (!row) throw AppError.notFound(`pull request ${pullId}`);
   if (row.state !== "open" || row.merged_at) throw new AppError("conflict", "conflict: the pull request is not open");
   return { user, pr: row };
@@ -376,6 +386,8 @@ export function registerPullActions(app: OpenAPIHono<AppEnv>) {
     const method = (c.req.valid("json") ?? {}).method ?? "squash";
     const { user, pr } = await writablePull(c, projectId, pullId);
     if (pr.draft === 1) throw new AppError("conflict", "conflict: a draft pull request cannot be merged");
+    const open = (await pullGates(c.env, pr)).find((g) => g.status === "open");
+    if (open) throw new AppError("conflict", `conflict: gate open: ${open.label}`);
     const res = await github(c.env, projectId, pr.full_name, "PUT", `/repos/${pr.full_name}/pulls/${pr.number}/merge`, { merge_method: method, sha: pr.head_sha });
     // 404: gone; 405: not mergeable (checks, conflicts, protection); 409: head moved; 422: method not allowed.
     if (res.status !== 200) throw new AppError(res.status === 404 ? "not_found" : "conflict", `${res.status === 404 ? "not found" : "conflict"}: ${message(res.json)}`);
@@ -453,6 +465,7 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
       .all<{ path: string; status: string; previous_path: string | null; additions: number; deletions: number }>();
     const files = results.map((f) => ({ path: f.path, status: f.status, previousPath: f.previous_path, additions: f.additions, deletions: f.deletions }));
     const checks = await checkRunsOf(c.env, row.repo_id, row.head_sha);
-    return c.json({ ...toPull(row), body: row.body, headSha: row.head_sha, files, checks, checksState: checksState(checks) }, 200);
+    const gates = await pullGates(c.env, { id: row.id, repo_id: row.repo_id, head_sha: row.head_sha });
+    return c.json({ ...toPull(row), body: row.body, headSha: row.head_sha, files, checks, checksState: checksState(checks), gates }, 200);
   });
 }
