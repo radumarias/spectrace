@@ -88,6 +88,7 @@ test("an agent review runs and its findings appear", async ({ page }) => {
   const base = {
     id: "rv-1", pullId: "pr-1", jobId: "job-9", headSha: "abc123", walkthrough: "", backend: null, model: null, error: null,
     createdAt: "2026-11-22T10:00:00Z", finishedAt: null, findings: [], dropped: 0,
+    summary: "", risk: null, riskReason: "", steps: [], decisions: [],
   };
   let review: Record<string, unknown> | null = null;
   await mockApi(page, {
@@ -128,6 +129,15 @@ test("an agent review runs and its findings appear", async ({ page }) => {
   review = {
     ...base, state: "succeeded", stage: "done", backend: "claude-code", model: "claude-opus-5-5", finishedAt: "2026-11-22T10:03:00Z", dropped: 1,
     walkthrough: "- `src/checkout/Declined.tsx` shows the gateway's reason next to the retry button.",
+    summary: "The declined screen shows the gateway's reason next to the retry button.",
+    risk: "medium",
+    riskReason: "It changes what shoppers see when a payment fails.",
+    steps: [{
+      title: "Declined screen", paths: ["src/checkout/Declined.tsx"], spec: "checkout.failed", impact: "medium",
+      change: "Renders the decline reason.", effect: "Shoppers see why their card was declined.",
+      code: "-  return <p>Declined</p>;\n+  return <p>Declined: {reason} and a very long line that must scroll inside the code block and never widen the page</p>;",
+    }],
+    decisions: ["Show the gateway's code, or a friendlier message?"],
     findings: [{
       id: 1, severity: "medium", path: "src/checkout/Declined.tsx", line: 12, spec: "spec/checkout.md",
       title: "The reason is shown raw from the gateway",
@@ -146,7 +156,12 @@ test("an agent review runs and its findings appear", async ({ page }) => {
   await expectNoHorizontalScroll(page);
 
   await page.getByRole("tab", { name: "Walkthrough" }).click();
-  await expect(page.getByText("shows the gateway's reason next to the retry button.")).toBeVisible();
+  await expect(page.getByText("The declined screen shows the gateway's reason next to the retry button.")).toBeVisible();
+  await expect(page.getByText("Declined screen", { exact: true })).toBeVisible();
+  await expect(page.getByText("medium impact")).toBeVisible();
+  await expect(page.getByText("Shoppers see why their card was declined.")).toBeVisible();
+  await expect(page.getByText("Show the gateway's code, or a friendlier message?")).toBeVisible();
+  await expect(page.getByText("risk MEDIUM").first()).toBeVisible();
   await expect(page.getByText("1 open finding from the reviewer.")).toBeVisible();
   await expect(page.getByText("✓ Agent review finished")).toBeVisible();
   await expectNoHorizontalScroll(page);

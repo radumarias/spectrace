@@ -133,6 +133,7 @@ export function useMergePull(projectId: string, pullId: string) {
 
 export type AgentReview = components["schemas"]["AgentReview"];
 export type Finding = components["schemas"]["Finding"];
+export type WalkStep = components["schemas"]["WalkStep"];
 
 export const agentReviewKeys = {
   all: (projectId: string) => ["agent-review", projectId] as const,

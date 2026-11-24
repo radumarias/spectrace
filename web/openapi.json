@@ -675,6 +675,38 @@
             "type": "string",
             "description": "Markdown, set once the review succeeded."
           },
+          "summary": {
+            "type": "string",
+            "description": "Two or three sentences on what the PR does. Empty for reviews made before structured walkthroughs."
+          },
+          "risk": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              null
+            ],
+            "description": "How likely the PR breaks something if merged as it is."
+          },
+          "riskReason": {
+            "type": "string"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WalkStep"
+            },
+            "description": "The change as numbered parts, in reading order."
+          },
+          "decisions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Questions the specs do not answer, for the owner."
+          },
           "backend": {
             "type": "string",
             "nullable": true,
@@ -721,6 +753,11 @@
           "state",
           "stage",
           "walkthrough",
+          "summary",
+          "risk",
+          "riskReason",
+          "steps",
+          "decisions",
           "backend",
           "model",
           "error",
@@ -728,6 +765,53 @@
           "finishedAt",
           "findings",
           "dropped"
+        ]
+      },
+      "WalkStep": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "spec": {
+            "type": "string",
+            "nullable": true,
+            "description": "Spec id or path this part touches, when it names one."
+          },
+          "impact": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "description": "How much this part can change behaviour for users or other code."
+          },
+          "change": {
+            "type": "string"
+          },
+          "effect": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "A few key lines from the diff, or empty."
+          }
+        },
+        "required": [
+          "title",
+          "paths",
+          "spec",
+          "impact",
+          "change",
+          "effect",
+          "code"
         ]
       },
       "Finding": {
