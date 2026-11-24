@@ -1,9 +1,9 @@
-import { useId, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
 import { isCurrentReview, isRunning, useAgentReview, useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, useRunAgentReview, type AgentReview, type Finding, type PullDetail as Pull, type WalkStep } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
-import { Diff } from "../ui/Diff";
+import { Diff, type Range } from "../ui/Diff";
 import { Inline } from "../ui/Inline";
 import { Markdown, stripHtmlComments } from "../ui/Markdown";
 import { useToast } from "../ui/Toast";
@@ -245,40 +245,152 @@ function CodeLines({ code }: { code: string }) {
   );
 }
 
+/** Lockfiles and the like: long, machine-written, and rarely what a reviewer wants open. */
+const GENERATED = /(^|\/)(Cargo\.lock|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|go\.sum|poetry\.lock|Gemfile\.lock|composer\.lock|uv\.lock|flake\.lock)$/;
+/** A step opens its files' diffs only when it has at most this many. */
+const OPEN_FILES_MAX = 3;
+
+const stepId = (n: number) => `walk-step-${n}`;
+
 /**
  * One numbered part of the change, in the order a reader takes it: title, spec and impact, what changed,
- * what it affects, then its files with their real diff from GitHub. The reviewer's excerpt is only shown
- * for a file whose diff is not stored.
+ * what it affects, then its files with the lines of their real diff that belong to this part. The header
+ * folds the part away. The reviewer's excerpt is only shown for a file whose diff is not stored.
  */
-function Step({ n, step, pull: p, diffs }: { n: number; step: WalkStep; pull: Pull; diffs: ReturnType<typeof usePullDiff> }) {
+function Step({ n, step, pull: p, diffs, shared, open, read, onToggle, onNext }: {
+  n: number;
+  step: WalkStep;
+  pull: Pull;
+  diffs: ReturnType<typeof usePullDiff>;
+  /** Paths that more than one step names: their diff is narrowed to this step's lines. */
+  shared: Set<string>;
+  open: boolean;
+  read: boolean;
+  onToggle: () => void;
+  onNext: (() => void) | null;
+}) {
   const files = step.paths.map((path) => ({ path, file: p.files.find((f) => f.path === path) }));
   const unknown = files.filter((f) => !f.file).map((f) => f.path);
+  const known = files.flatMap((f) => (f.file ? [f.file] : []));
+  const added = known.reduce((s, f) => s + f.additions, 0);
+  const removed = known.reduce((s, f) => s + f.deletions, 0);
+  const bodyId = useId();
   return (
-    <div className="step walk-step">
-      <span className="n">{n}</span>
+    <div className={`step walk-step${open ? "" : " folded"}`} id={stepId(n)}>
+      <span className="n">{read ? "✓" : n}</span>
       <span className="stack-s" style={{ minWidth: 0 }}>
-        <span className="btns" style={{ gap: 6 }}>
-          <b className="walk-title"><Inline>{step.title}</Inline></b>
-          {step.spec && <span className="id">{step.spec}</span>}
-          <Pill tone={IMPACT[step.impact]}>{step.impact} impact</Pill>
-        </span>
-        {step.change && <p className="walk-change"><Inline>{step.change}</Inline></p>}
-        {step.effect && (
-          <p className="walk-effect">
-            <span className="lbl">Affects</span> <Inline>{step.effect}</Inline>
-          </p>
-        )}
-        {files.map(({ path, file }) =>
-          file ? <FileRow key={path} file={file} patch={diffs.data?.get(path)} pending={diffs.isPending} htmlUrl={p.htmlUrl} defaultOpen /> : null,
-        )}
-        {unknown.length > 0 && (
+        <button type="button" className="walk-head" aria-expanded={open} aria-controls={bodyId} onClick={onToggle}>
           <span className="btns" style={{ gap: 6 }}>
-            {unknown.map((path) => <code key={path} style={{ overflowWrap: "anywhere" }}>{path}</code>)}
+            <span aria-hidden="true" className="walk-caret">{open ? "▾" : "▸"}</span>
+            <b className="walk-title"><Inline>{step.title}</Inline></b>
+            {step.spec && <span className="id">{step.spec}</span>}
+            <Pill tone={IMPACT[step.impact]}>{step.impact} impact</Pill>
+            {!open && (
+              <span className="mono sub" style={{ fontSize: 12 }}>
+                {known.length} {known.length === 1 ? "file" : "files"} · <span style={{ color: "var(--ok)" }}>+{added}</span> <span style={{ color: "var(--bad)" }}>−{removed}</span>
+              </span>
+            )}
+          </span>
+        </button>
+        {open && (
+          <span id={bodyId} className="stack-s" style={{ minWidth: 0 }}>
+            {step.change && <p className="walk-change"><Inline>{step.change}</Inline></p>}
+            {step.effect && (
+              <p className="walk-effect">
+                <span className="lbl">Affects</span> <Inline>{step.effect}</Inline>
+              </p>
+            )}
+            {files.map(({ path, file }) =>
+              file ? (
+                <FileRow
+                  key={path}
+                  file={file}
+                  patch={diffs.data?.get(path)}
+                  pending={diffs.isPending}
+                  htmlUrl={p.htmlUrl}
+                  defaultOpen={known.length <= OPEN_FILES_MAX && !GENERATED.test(path)}
+                  ranges={step.lines.filter((r) => r.path === path)}
+                  excerpt={shared.has(path) ? step.code : ""}
+                />
+              ) : null,
+            )}
+            {unknown.length > 0 && (
+              <span className="btns" style={{ gap: 6 }}>
+                {unknown.map((path) => <code key={path} style={{ overflowWrap: "anywhere" }}>{path}</code>)}
+              </span>
+            )}
+            {(unknown.length > 0 || files.length === 0) && step.code.trim() && <CodeLines code={step.code} />}
+            {onNext && (
+              <span className="btns" style={{ justifyContent: "flex-end" }}>
+                <Button small onClick={onNext}>Done, next part ↓</Button>
+              </span>
+            )}
           </span>
         )}
-        {(unknown.length > 0 || files.length === 0) && step.code.trim() && <CodeLines code={step.code} />}
       </span>
     </div>
+  );
+}
+
+const scrollToStep = (n: number) => document.getElementById(stepId(n))?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+
+/** The numbered parts with a contents list to jump between them and buttons to fold them all. */
+function Steps({ steps, pull: p, diffs }: { steps: WalkStep[]; pull: Pull; diffs: ReturnType<typeof usePullDiff> }) {
+  const [closed, setClosed] = useState<Set<number>>(() => new Set());
+  const [read, setRead] = useState<Set<number>>(() => new Set());
+  const shared = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const s of steps) for (const path of new Set(s.paths)) seen.set(path, (seen.get(path) ?? 0) + 1);
+    return new Set([...seen].filter(([, k]) => k > 1).map(([path]) => path));
+  }, [steps]);
+  const toggle = (i: number) => setClosed((c) => { const next = new Set(c); if (next.has(i)) next.delete(i); else next.add(i); return next; });
+  const jump = (i: number) => {
+    setClosed((c) => { const next = new Set(c); next.delete(i); return next; });
+    requestAnimationFrame(() => scrollToStep(i + 1));
+  };
+  const next = (i: number) => {
+    setRead((r) => new Set(r).add(i));
+    setClosed((c) => { const n = new Set(c).add(i); n.delete(i + 1); return n; });
+    requestAnimationFrame(() => scrollToStep(i + 2));
+  };
+  return (
+    <>
+      <div className="walk-nav">
+        <span className="btns" style={{ justifyContent: "space-between" }}>
+          <span className="lbl">Walkthrough · {steps.length} {steps.length === 1 ? "part" : "parts"}{read.size > 0 ? ` · ${read.size} read` : ""}</span>
+          <span className="btns" style={{ gap: 6 }}>
+            <Button small variant="ghost" onClick={() => setClosed(new Set())}>Expand all</Button>
+            <Button small variant="ghost" onClick={() => setClosed(new Set(steps.map((_, i) => i)))}>Collapse all</Button>
+          </span>
+        </span>
+        {steps.length > 1 && (
+          <ol className="walk-toc">
+            {steps.map((s, i) => (
+              <li key={`${i}-${s.title}`}>
+                <button type="button" className={read.has(i) ? "done" : undefined} onClick={() => jump(i)}>
+                  <span className="mono">{read.has(i) ? "✓" : i + 1}</span> <Inline>{s.title}</Inline>
+                  <span className={`dot d-${s.impact}`} aria-label={`${s.impact} impact`} />
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      {steps.map((step, i) => (
+        <Step
+          key={`${i}-${step.title}`}
+          n={i + 1}
+          step={step}
+          pull={p}
+          diffs={diffs}
+          shared={shared}
+          open={!closed.has(i)}
+          read={read.has(i)}
+          onToggle={() => toggle(i)}
+          onNext={i < steps.length - 1 ? () => next(i) : null}
+        />
+      ))}
+    </>
   );
 }
 
@@ -308,7 +420,7 @@ function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }:
           ) : (
             <p className="sub">The author did not write a description.</p>
           )}
-          {steps.map((step, i) => <Step key={`${i}-${step.title}`} n={i + 1} step={step} pull={p} diffs={diffs} />)}
+          {steps.length > 0 && <Steps steps={steps} pull={p} diffs={diffs} />}
           {diffs.error && <p className="err" role="alert">{diffs.error.message}</p>}
           {done && steps.length === 0 && review.walkthrough.trim() && (
             <>
@@ -399,7 +511,17 @@ function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }:
 type PullFile = Pull["files"][number];
 
 /** One changed file: a header with its status and counts, and its diff when open. */
-function FileRow({ file: f, patch, pending, htmlUrl, defaultOpen = false }: { file: PullFile; patch: string | null | undefined; pending: boolean; htmlUrl: string; defaultOpen?: boolean }) {
+function FileRow({ file: f, patch, pending, htmlUrl, defaultOpen = false, ranges, excerpt }: {
+  file: PullFile;
+  patch: string | null | undefined;
+  pending: boolean;
+  htmlUrl: string;
+  defaultOpen?: boolean;
+  /** Narrow the diff to these new-file lines (a walkthrough step's own part of the file). */
+  ranges?: Range[];
+  /** Or to the hunks that quote this excerpt. */
+  excerpt?: string;
+}) {
   const [expanded, setExpanded] = useState(defaultOpen);
   const id = useId();
   return (
@@ -420,7 +542,7 @@ function FileRow({ file: f, patch, pending, htmlUrl, defaultOpen = false }: { fi
           {pending ? (
             <p className="sub pad">Loading the changes…</p>
           ) : patch ? (
-            <Diff patch={patch} />
+            <Diff patch={patch} ranges={ranges} excerpt={excerpt} />
           ) : (
             <p className="sub pad">
               No diff to show here: the file is binary, empty, or too large.{" "}

@@ -56,6 +56,14 @@ export interface WalkStep {
   change: string;
   effect: string;
   code: string;
+  /** The lines of each file that belong to this part, as ranges in the new file (or the old one, for a removed file). */
+  lines: LineRange[];
+}
+
+export interface LineRange {
+  path: string;
+  start: number;
+  end: number;
 }
 
 export interface Walkthrough {
@@ -140,6 +148,25 @@ function severityOf(word: string): Severity {
 
 const MAX_STEPS = 12;
 const MAX_CODE_LINES = 12;
+const MAX_RANGES = 40;
+
+/** Line ranges of a step, kept to whole positive numbers on files the step names. */
+function rangesOf(v: unknown, paths: string[]): LineRange[] {
+  if (!Array.isArray(v)) return [];
+  const out: LineRange[] = [];
+  for (const r of v) {
+    if (!r || typeof r !== "object") continue;
+    const o = r as Record<string, unknown>;
+    const path = str(o.path, 500);
+    const start = Number(o.start);
+    const end = o.end === undefined || o.end === null ? start : Number(o.end);
+    if (!path || (paths.length > 0 && !paths.includes(path))) continue;
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) continue;
+    out.push({ path, start, end });
+    if (out.length === MAX_RANGES) break;
+  }
+  return out;
+}
 
 const strList = (v: unknown, maxItems: number, maxLen: number): string[] =>
   Array.isArray(v) ? v.map((x) => str(x, maxLen)).filter(Boolean).slice(0, maxItems) : [];
@@ -168,6 +195,7 @@ export function parseWalkthrough(obj: Record<string, unknown>): Walkthrough {
       change: str(o.change ?? o.explanation, 2_000),
       effect: str(o.effect, 2_000),
       code: excerpt(o.code),
+      lines: rangesOf(o.lines, paths),
     });
   }
   const risk = str(obj.risk, 10).toLowerCase();
@@ -222,12 +250,12 @@ Find real problems a careful senior engineer would block or flag: bugs, broken o
 
 Severity: "high" means wrong behaviour, data loss or a security hole; "medium" means a likely bug or an unmet requirement; "low" means a smaller risk worth fixing.
 
-Also write a walkthrough a reviewer can read in two minutes before looking at the diff. Split the change into the few parts a person would explain it by (a flow step, a feature, a refactor, tests, build files), ordered so each part makes sense after the ones before it: start where the behaviour starts. For each part say what changed and what it affects. Impact: "high" changes what users see or what other parts rely on (money, data, auth, public APIs, the spec'd flow); "medium" changes behaviour inside one area; "low" changes no behaviour (tests, docs, build, renames). The overall risk is how likely this PR breaks something if merged as it is, considering the impact, the tests and your findings. List as decisions only questions the specs and the description do not answer and the author or owner must settle (an assumption the code makes, a requirement the change contradicts); none is fine.
+Also write a walkthrough a reviewer can read in two minutes before looking at the diff. Split the change into the few parts a person would explain it by (a flow step, a feature, a refactor, tests, build files), ordered so each part makes sense after the ones before it: start where the behaviour starts. For each part say what changed and what it affects, and give the line ranges of the diff that belong to it (line numbers in the new file, from the hunk headers; a file split across parts gets only its own lines in each part; a file wholly in one part may have no ranges). Impact: "high" changes what users see or what other parts rely on (money, data, auth, public APIs, the spec'd flow); "medium" changes behaviour inside one area; "low" changes no behaviour (tests, docs, build, renames). The overall risk is how likely this PR breaks something if merged as it is, considering the impact, the tests and your findings. List as decisions only questions the specs and the description do not answer and the author or owner must settle (an assumption the code makes, a requirement the change contradicts); none is fine.
 
 Do not use any tools. Answer with one JSON object and nothing else:
 {"summary": "<two or three plain sentences: what the PR does and why, for someone who has not seen it>",
  "risk": "high|medium|low", "risk_reason": "<one sentence: why that risk>",
- "steps": [{"title": "<short name of the part>", "paths": ["<file paths from the diff>"], "spec": "<spec id or spec path it touches, or null>", "impact": "high|medium|low", "change": "<what changed, one to three sentences>", "effect": "<what it affects: behaviour, users, other code; one or two sentences>", "code": "<the few key lines from the diff, at most 8, with + and - kept, or empty>"}],
+ "steps": [{"title": "<short name of the part>", "paths": ["<file paths from the diff>"], "spec": "<spec id or spec path it touches, or null>", "impact": "high|medium|low", "change": "<what changed, one to three sentences>", "effect": "<what it affects: behaviour, users, other code; one or two sentences>", "code": "<the few key lines from the diff, at most 8, with + and - kept, or empty>", "lines": [{"path": "<one of paths>", "start": <first line>, "end": <last line>}]}],
  "decisions": ["<a question for the owner>"],
  "walkthrough": "<the same as short Markdown: the summary, then one bullet per step>",
  "findings": [{"severity": "high|medium|low", "path": "<file path from the diff>", "line": <line number in the new file, or null>, "title": "<one line>", "body": "<why it is a problem, citing the code>", "suggested_fix": "<what to change>", "spec": "<spec path it breaks, or null>"}]}

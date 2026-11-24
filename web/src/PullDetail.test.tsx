@@ -330,14 +330,14 @@ it("shows the walkthrough as numbered steps with impact, risk and questions for 
     risk: "medium",
     riskReason: "Touches the payment flow, but only what is shown.",
     steps: [
-      { title: "Declined screen", paths: ["src/checkout/Declined.tsx"], spec: "checkout.failed", impact: "medium", change: "Shows the decline reason.", effect: "Shoppers see why their card failed.", code: "- <p>Declined</p>\n+ <p>Declined: {reason}</p>" },
-      { title: "Tests", paths: ["src/checkout/Declined.test.tsx"], spec: null, impact: "low", change: "One new test.", effect: "", code: "" },
+      { title: "Declined screen", paths: ["src/checkout/Declined.tsx"], spec: "checkout.failed", impact: "medium", change: "Shows the decline reason.", effect: "Shoppers see why their card failed.", code: "- <p>Declined</p>\n+ <p>Declined: {reason}</p>", lines: [] },
+      { title: "Tests", paths: ["src/checkout/Declined.test.tsx"], spec: null, impact: "low", change: "One new test.", effect: "", code: "", lines: [] },
     ],
     decisions: ["Should the raw gateway reason be shown, or a friendlier one?"],
   });
   at("/pr/pr-1");
   expect(await screen.findByText("Declined payments now say why, next to the retry button.")).toBeTruthy();
-  expect(screen.getByText("Declined screen")).toBeTruthy();
+  expect(screen.getAllByText("Declined screen")).toHaveLength(2); // the contents list and the step
   expect(screen.getByText("checkout.failed")).toBeTruthy();
   expect(screen.getByText("medium impact")).toBeTruthy();
   expect(screen.getByText("low impact")).toBeTruthy();
@@ -345,7 +345,7 @@ it("shows the walkthrough as numbered steps with impact, risk and questions for 
   // The step's file shows its real diff from GitHub, open, after the change and what it affects.
   const diff = await screen.findByRole("table", { name: "Changes" });
   expect(diff.textContent).toContain("return <p>Declined: {reason}</p>;");
-  const step = screen.getByText("Declined screen").closest(".walk-step")!;
+  const step = document.getElementById("walk-step-1")!;
   const text = step.textContent!;
   expect(text.indexOf("Shows the decline reason.")).toBeLessThan(text.indexOf("Shoppers see why"));
   expect(text.indexOf("Shoppers see why")).toBeLessThan(text.indexOf("src/checkout/Declined.tsx"));
@@ -356,6 +356,19 @@ it("shows the walkthrough as numbered steps with impact, risk and questions for 
   expect(screen.getByText("Should the raw gateway reason be shown, or a friendlier one?")).toBeTruthy();
   // The author's own description moves below the walkthrough.
   expect(screen.getByText("The author's description")).toBeTruthy();
+
+  // Parts fold away, one by one or all together, and "next" marks one read and moves on.
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Done, next part ↓" }));
+  expect(screen.getByText("Walkthrough · 2 parts · 1 read")).toBeTruthy();
+  expect(screen.queryByText("Shoppers see why their card failed.")).toBeNull();
+  expect(screen.getByText("One new test.")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Collapse all" }));
+  expect(screen.queryByText("One new test.")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Expand all" }));
+  expect(screen.getByText("Shoppers see why their card failed.")).toBeTruthy();
+  await user.click(document.querySelector<HTMLElement>("#walk-step-1 .walk-head")!);
+  expect(screen.queryByText("Shoppers see why their card failed.")).toBeNull();
 });
 
 it("offers to run again when the review is of an older commit", async () => {

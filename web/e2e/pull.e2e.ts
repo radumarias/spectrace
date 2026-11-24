@@ -136,6 +136,7 @@ test("an agent review runs and its findings appear", async ({ page }) => {
       title: "Declined screen", paths: ["src/checkout/Declined.tsx"], spec: "checkout.failed", impact: "medium",
       change: "Renders the decline reason.", effect: "Shoppers see why their card was declined.",
       code: "-  return <p>Declined</p>;\n+  return <p>Declined: {reason} and a very long line that must scroll inside the code block and never widen the page</p>;",
+      lines: [],
     }],
     decisions: ["Show the gateway's code, or a friendlier message?"],
     findings: [{
@@ -165,5 +166,60 @@ test("an agent review runs and its findings appear", async ({ page }) => {
   await expect(page.getByText("1 open finding from the reviewer.")).toBeVisible();
   await expect(page.getByText("✓ Agent review finished")).toBeVisible();
   await expectNoHorizontalScroll(page);
+  expect(errors).toEqual([]);
+});
+
+// A walkthrough with parts that share a file: each part shows only its own lines, long diffs are cut,
+// lockfiles stay closed, and parts fold and move on.
+test("walkthrough parts show their own lines and fold away", async ({ page }) => {
+  const big = ["@@ -0,0 +1,120 @@", ...Array.from({ length: 120 }, (_, i) => `+pub fn message_${i + 1}() -> &'static str { "text" }`)].join("\n");
+  const lock = ["@@ -10,3 +10,63 @@", " [[package]]", ...Array.from({ length: 60 }, (_, i) => `+name = "dep-${i}"`), " end", " tail"].join("\n");
+  const pull = {
+    ...PULL,
+    files: [
+      { path: "src/i18n.rs", status: "added", previousPath: null, additions: 120, deletions: 0 },
+      { path: "Cargo.lock", status: "modified", previousPath: null, additions: 60, deletions: 0 },
+    ],
+  };
+  const review = {
+    id: "rv-1", pullId: "pr-1", jobId: "job-9", headSha: "abc123", walkthrough: "", backend: "claude-code", model: null, error: null,
+    createdAt: "2026-11-22T10:00:00Z", finishedAt: "2026-11-22T10:03:00Z", findings: [], dropped: 0, state: "succeeded", stage: "done",
+    summary: "Adds a message catalogue.", risk: "low", riskReason: "Only new code.", decisions: [],
+    steps: [
+      { title: "Messages", paths: ["src/i18n.rs"], spec: null, impact: "medium", change: "Adds `Msg`.", effect: "Both UIs use it.", code: "", lines: [{ path: "src/i18n.rs", start: 1, end: 60 }] },
+      { title: "Locale switch", paths: ["src/i18n.rs"], spec: null, impact: "low", change: "Adds `set_locale`.", effect: "Nothing yet.", code: "", lines: [{ path: "src/i18n.rs", start: 100, end: 104 }] },
+      { title: "Dependencies", paths: ["Cargo.lock"], spec: null, impact: "low", change: "Adds fluent.", effect: "Bigger wasm.", code: "", lines: [] },
+    ],
+  };
+  await mockApi(page, {
+    "/api/me": USER, "/api/projects": [PROJECT], "/api/projects/p1/pulls": { pulls: [pull], counts: { needs: 1, open: 1, merged: 0 } },
+    "/api/projects/p1/pulls/pr-1": pull, "/api/projects/p1/pulls/pr-1/reviews": { reviews: [] }, "/api/projects/p1/pulls/pr-1/agent-review": { review },
+    "/api/projects/p1/pulls/pr-1/diff": { files: [{ path: "Cargo.lock", patch: lock }, { path: "src/i18n.rs", patch: big }] },
+  });
+  await page.addInitScript(() => localStorage.setItem("spectrace-proj", "p1"));
+  const errors = trackErrors(page);
+  await page.goto("/pr/pr-1");
+
+  const first = page.locator("#walk-step-1");
+  // Its lines 1-60, 3 of context and a gap row, cut to the first 40 rows (the hunk header and lines 1-39).
+  await expect(first.getByText("message_39()")).toBeVisible();
+  await expect(first.getByText("message_40()")).toHaveCount(0);
+  await expect(first.getByRole("button", { name: "Show 25 more lines" })).toBeVisible();
+  await expect(first.getByRole("button", { name: "Show the whole file's changes (57 more changed lines)" })).toBeVisible();
+  const second = page.locator("#walk-step-2");
+  await expect(second.getByText("message_100()")).toBeVisible();
+  await expect(second.getByText("message_50()")).toHaveCount(0);
+  await expect(page.locator("#walk-step-3").getByRole("button", { name: /Cargo\.lock/ })).toHaveAttribute("aria-expanded", "false");
+  await expectNoHorizontalScroll(page);
+  if (process.env.SHOT) await page.screenshot({ path: `${process.env.SHOT}-${page.viewportSize()!.width}.png`, fullPage: true });
+
+  await first.getByRole("button", { name: "Done, next part ↓" }).click();
+  await expect(page.getByText("Walkthrough · 3 parts · 1 read")).toBeVisible();
+  await expect(first.getByText("Both UIs use it.")).toHaveCount(0);
+  await page.getByRole("button", { name: "Collapse all" }).click();
+  await expect(second.getByText("Nothing yet.")).toHaveCount(0);
+  await page.getByRole("button", { name: /Locale switch/ }).first().click();
+  await expect(second.getByText("Nothing yet.")).toBeVisible();
+  if (process.env.SHOT) await page.screenshot({ path: `${process.env.SHOT}-folded-${page.viewportSize()!.width}.png`, fullPage: true });
   expect(errors).toEqual([]);
 });

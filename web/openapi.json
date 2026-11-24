@@ -802,6 +802,29 @@
           "code": {
             "type": "string",
             "description": "A few key lines from the diff, or empty."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "integer"
+                },
+                "end": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "path",
+                "start",
+                "end"
+              ]
+            },
+            "description": "The new-file line ranges of each file that belong to this part; empty when the whole files do (and for reviews made before ranges)."
           }
         },
         "required": [
@@ -811,7 +834,8 @@
           "impact",
           "change",
           "effect",
-          "code"
+          "code",
+          "lines"
         ]
       },
       "Finding": {
