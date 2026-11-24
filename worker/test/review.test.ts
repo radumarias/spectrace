@@ -130,6 +130,11 @@ interface ReviewBody {
     state: string;
     stage: string;
     walkthrough: string;
+    summary: string;
+    risk: string | null;
+    riskReason: string;
+    steps: { title: string; paths: string[]; spec: string | null; impact: string; change: string; effect: string; code: string }[];
+    decisions: string[];
     backend: string | null;
     error: string | null;
     dropped: number;
@@ -140,7 +145,17 @@ interface ReviewBody {
 let spy: ReturnType<typeof fakeClaude>;
 beforeEach(() => {
   calls = [];
-  finderAnswer = "Here is my review:\n```json\n" + JSON.stringify({ walkthrough: "- `src/checkout.rs`: pay() now makes its own key.", findings: [FALSE_ALARM, BUG] }) + "\n```";
+  finderAnswer = "Here is my review:\n```json\n" + JSON.stringify({
+    summary: "Pay makes a fresh idempotency key on every attempt.",
+    risk: "high",
+    risk_reason: "A retry can charge the card twice.",
+    steps: [
+      { title: "Pay", paths: ["src/checkout.rs"], spec: "checkout.pay", impact: "high", change: "pay() makes its own key.", effect: "Retries are no longer idempotent.", code: "- let key = o.idempotency_key();\n+ let key = Uuid::new_v4();" },
+    ],
+    decisions: ["Should a retry reuse the order's key?"],
+    walkthrough: "- `src/checkout.rs`: pay() now makes its own key.",
+    findings: [FALSE_ALARM, BUG],
+  }) + "\n```";
   spy = fakeClaude();
 });
 afterEach(() => {
@@ -162,6 +177,15 @@ describe("review job", () => {
     const body = (await (await call(s)).json()) as ReviewBody;
     expect(body.review).toMatchObject({ state: "succeeded", stage: "done", backend: "api", dropped: 1, error: null });
     expect(body.review!.walkthrough).toContain("src/checkout.rs");
+    expect(body.review).toMatchObject({
+      summary: "Pay makes a fresh idempotency key on every attempt.",
+      risk: "high",
+      riskReason: "A retry can charge the card twice.",
+      decisions: ["Should a retry reuse the order's key?"],
+    });
+    expect(body.review!.steps).toEqual([
+      { title: "Pay", paths: ["src/checkout.rs"], spec: "checkout.pay", impact: "high", change: "pay() makes its own key.", effect: "Retries are no longer idempotent.", code: "- let key = o.idempotency_key();\n+ let key = Uuid::new_v4();" },
+    ]);
     expect(body.review!.findings).toEqual([
       expect.objectContaining({ severity: "high", title: BUG.title, path: "src/checkout.rs", line: 15, suggestedFix: BUG.suggested_fix, spec: "spec/checkout.md" }),
     ]);
@@ -267,9 +291,24 @@ describe("parsing model answers", () => {
     expect(parseFinderAnswer('{"retries": 3}')).toBeNull();
   });
 
+  it("cleans the walkthrough steps: unknown impact is medium, untitled steps go, long code is cut", () => {
+    const code = Array.from({ length: 20 }, (_, i) => `+ line ${i}`).join("\n");
+    const out = parseFinderAnswer(JSON.stringify({
+      summary: "s", risk: "Critical", steps: [{ title: "A", path: "a.ts", impact: "whatever", code: "```ts\n" + code + "\n```" }, { impact: "high" }], decisions: ["q", 3, ""],
+    }))!;
+    expect(out.walk.risk).toBe("high");
+    expect(out.walk.decisions).toEqual(["q"]);
+    expect(out.walk.steps).toHaveLength(1);
+    expect(out.walk.steps[0]).toMatchObject({ title: "A", paths: ["a.ts"], spec: null, impact: "medium", change: "", effect: "" });
+    expect(out.walk.steps[0]!.code.split("\n")).toHaveLength(13);
+    expect(out.walk.steps[0]!.code.startsWith("+ line 0")).toBe(true);
+    // An older answer with only Markdown still reads, with no steps and no risk.
+    expect(parseFinderAnswer(JSON.stringify({ walkthrough: "w", findings: [] }))!.walk).toMatchObject({ risk: null, steps: [], decisions: [], markdown: "w" });
+  });
+
   it("cleans findings and refuses unreadable verdicts", () => {
     const out = parseFinderAnswer(JSON.stringify({ walkthrough: "w", findings: [{ severity: "CRITICAL", title: "t", line: "x" }, { severity: "high" }] }));
-    expect(out).toEqual({ walkthrough: "w", findings: [{ severity: "high", path: "", line: null, title: "t", body: "", suggestedFix: "", spec: null }] });
+    expect(out).toMatchObject({ walkthrough: "w", findings: [{ severity: "high", path: "", line: null, title: "t", body: "", suggestedFix: "", spec: null }] });
     const sev = (severity: string) => parseFinderAnswer(JSON.stringify({ findings: [{ severity, title: "t" }] }))!.findings[0]!.severity;
     expect([sev("Blocker"), sev("minor"), sev("whatever")]).toEqual(["high", "low", "medium"]);
     expect(parseVerdict("maybe")).toEqual({ real: false, reason: "The refuter's answer could not be read." });

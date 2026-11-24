@@ -25,6 +25,18 @@ const Finding = z
   })
   .openapi("Finding");
 
+const WalkStep = z
+  .object({
+    title: z.string(),
+    paths: z.array(z.string()),
+    spec: z.string().nullable().openapi({ description: "Spec id or path this part touches, when it names one." }),
+    impact: z.enum(["high", "medium", "low"]).openapi({ description: "How much this part can change behaviour for users or other code." }),
+    change: z.string(),
+    effect: z.string(),
+    code: z.string().openapi({ description: "A few key lines from the diff, or empty." }),
+  })
+  .openapi("WalkStep");
+
 const AgentReview = z
   .object({
     id: z.string(),
@@ -34,6 +46,11 @@ const AgentReview = z
     state: z.enum(["queued", "running", "succeeded", "failed"]),
     stage: z.string().openapi({ description: "queued, reading, reviewing, refuting, done or failed." }),
     walkthrough: z.string().openapi({ description: "Markdown, set once the review succeeded." }),
+    summary: z.string().openapi({ description: "Two or three sentences on what the PR does. Empty for reviews made before structured walkthroughs." }),
+    risk: z.enum(["high", "medium", "low"]).nullable().openapi({ description: "How likely the PR breaks something if merged as it is." }),
+    riskReason: z.string(),
+    steps: z.array(WalkStep).openapi({ description: "The change as numbered parts, in reading order." }),
+    decisions: z.array(z.string()).openapi({ description: "Questions the specs do not answer, for the owner." }),
     backend: z.enum(["claude-code", "user_key", "api"]).nullable().openapi({ description: "Which Claude ran it: the owner's subscription, the requester's own key, or the server's key." }),
     model: z.string().nullable(),
     error: z.string().nullable(),
@@ -87,6 +104,11 @@ interface ReviewRow {
   state: "queued" | "running" | "succeeded" | "failed";
   stage: string;
   walkthrough: string;
+  summary: string;
+  risk: "high" | "medium" | "low" | null;
+  risk_reason: string;
+  steps: string;
+  decisions: string;
   backend: "claude-code" | "user_key" | "api" | null;
   model: string | null;
   error: string | null;
@@ -108,6 +130,16 @@ interface FindingRow {
 
 const RANK = { high: 0, medium: 1, low: 2 } as const;
 
+/** A stored JSON array, or [] when it is missing or broken. */
+function jsonArray(text: string | null | undefined): unknown[] {
+  try {
+    const v: unknown = JSON.parse(text ?? "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
 async function toReview(env: Bindings, r: ReviewRow): Promise<z.infer<typeof AgentReview>> {
   // Findings are stored together with the success, so only a finished review has any.
   const { results } = r.state !== "succeeded" ? { results: [] as FindingRow[] } : await env.DB.prepare("SELECT id, severity, path, line, title, body, suggested_fix, spec, refuted FROM findings WHERE review_id = ?1 ORDER BY id").bind(r.id).all<FindingRow>();
@@ -120,6 +152,11 @@ async function toReview(env: Bindings, r: ReviewRow): Promise<z.infer<typeof Age
     state: r.state,
     stage: r.stage,
     walkthrough: r.walkthrough,
+    summary: r.summary,
+    risk: r.risk,
+    riskReason: r.risk_reason,
+    steps: jsonArray(r.steps) as z.infer<typeof WalkStep>[],
+    decisions: jsonArray(r.decisions).filter((d): d is string => typeof d === "string"),
     backend: r.backend,
     model: r.model,
     error: r.error,

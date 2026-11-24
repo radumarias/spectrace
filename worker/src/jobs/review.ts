@@ -46,6 +46,28 @@ export interface Finding {
   spec: string | null;
 }
 
+/** One part of the change, in the order a reader should take it. */
+export interface WalkStep {
+  title: string;
+  paths: string[];
+  spec: string | null;
+  /** How much this part can change behaviour for users or other parts of the system. */
+  impact: Severity;
+  change: string;
+  effect: string;
+  code: string;
+}
+
+export interface Walkthrough {
+  summary: string;
+  risk: Severity | null;
+  riskReason: string;
+  steps: WalkStep[];
+  decisions: string[];
+  /** Markdown, for older readers and as a fallback when the model gave no steps. */
+  markdown: string;
+}
+
 export interface Verdict {
   real: boolean;
   reason: string;
@@ -116,11 +138,55 @@ function severityOf(word: string): Severity {
   return "medium";
 }
 
+const MAX_STEPS = 12;
+const MAX_CODE_LINES = 12;
+
+const strList = (v: unknown, maxItems: number, maxLen: number): string[] =>
+  Array.isArray(v) ? v.map((x) => str(x, maxLen)).filter(Boolean).slice(0, maxItems) : [];
+
+/** A code excerpt kept short: at most MAX_CODE_LINES lines. */
+function excerpt(v: unknown): string {
+  const lines = str(v, 4_000).replace(/^```[^\n]*\n?|\n?```$/g, "").split("\n");
+  return lines.length > MAX_CODE_LINES ? [...lines.slice(0, MAX_CODE_LINES), "…"].join("\n") : lines.join("\n");
+}
+
+/** The structured walkthrough from the finder's answer. A missing part is empty, never invented. */
+export function parseWalkthrough(obj: Record<string, unknown>): Walkthrough {
+  const rawSteps = Array.isArray(obj.steps) ? obj.steps : [];
+  const steps: WalkStep[] = [];
+  for (const s of rawSteps.slice(0, MAX_STEPS)) {
+    if (!s || typeof s !== "object") continue;
+    const o = s as Record<string, unknown>;
+    const title = str(o.title, 200);
+    if (!title) continue;
+    const paths = Array.isArray(o.paths) ? strList(o.paths, 20, 500) : strList([o.path], 1, 500);
+    steps.push({
+      title,
+      paths,
+      spec: str(o.spec, 500) || null,
+      impact: severityOf(str(o.impact ?? o.severity, 10).toLowerCase()),
+      change: str(o.change ?? o.explanation, 2_000),
+      effect: str(o.effect, 2_000),
+      code: excerpt(o.code),
+    });
+  }
+  const risk = str(obj.risk, 10).toLowerCase();
+  return {
+    summary: str(obj.summary, 2_000),
+    risk: risk ? severityOf(risk) : null,
+    riskReason: str(obj.risk_reason ?? obj.riskReason, 1_000),
+    steps,
+    decisions: strList(obj.decisions, 8, 500),
+    markdown: str(obj.walkthrough, 20_000),
+  };
+}
+
 /** The finder's answer, cleaned: unknown severities become "medium", findings without a title are dropped. */
-export function parseFinderAnswer(text: string): { walkthrough: string; findings: Finding[] } | null {
+export function parseFinderAnswer(text: string): { walkthrough: string; walk: Walkthrough; findings: Finding[] } | null {
   const obj = parseJsonObject(text);
-  if (!obj || (typeof obj.walkthrough !== "string" && !Array.isArray(obj.findings))) return null;
-  const walkthrough = str(obj.walkthrough, 20_000);
+  if (!obj || (typeof obj.walkthrough !== "string" && !Array.isArray(obj.findings) && !Array.isArray(obj.steps))) return null;
+  const walk = parseWalkthrough(obj);
+  const walkthrough = walk.markdown;
   const raw = Array.isArray(obj.findings) ? obj.findings : [];
   const findings: Finding[] = [];
   for (const f of raw.slice(0, MAX_FINDINGS)) {
@@ -140,7 +206,7 @@ export function parseFinderAnswer(text: string): { walkthrough: string; findings
       spec: str(o.spec, 500) || null,
     });
   }
-  return { walkthrough, findings };
+  return { walkthrough, walk, findings };
 }
 
 /** A refuter's answer. Anything that is not a clear "real" counts as not confirmed. */
@@ -156,8 +222,14 @@ Find real problems a careful senior engineer would block or flag: bugs, broken o
 
 Severity: "high" means wrong behaviour, data loss or a security hole; "medium" means a likely bug or an unmet requirement; "low" means a smaller risk worth fixing.
 
+Also write a walkthrough a reviewer can read in two minutes before looking at the diff. Split the change into the few parts a person would explain it by (a flow step, a feature, a refactor, tests, build files), ordered so each part makes sense after the ones before it: start where the behaviour starts. For each part say what changed and what it affects. Impact: "high" changes what users see or what other parts rely on (money, data, auth, public APIs, the spec'd flow); "medium" changes behaviour inside one area; "low" changes no behaviour (tests, docs, build, renames). The overall risk is how likely this PR breaks something if merged as it is, considering the impact, the tests and your findings. List as decisions only questions the specs and the description do not answer and the author or owner must settle (an assumption the code makes, a requirement the change contradicts); none is fine.
+
 Do not use any tools. Answer with one JSON object and nothing else:
-{"walkthrough": "<Markdown: what the PR does, file by file in a short list, and how it relates to the specs>",
+{"summary": "<two or three plain sentences: what the PR does and why, for someone who has not seen it>",
+ "risk": "high|medium|low", "risk_reason": "<one sentence: why that risk>",
+ "steps": [{"title": "<short name of the part>", "paths": ["<file paths from the diff>"], "spec": "<spec id or spec path it touches, or null>", "impact": "high|medium|low", "change": "<what changed, one to three sentences>", "effect": "<what it affects: behaviour, users, other code; one or two sentences>", "code": "<the few key lines from the diff, at most 8, with + and - kept, or empty>"}],
+ "decisions": ["<a question for the owner>"],
+ "walkthrough": "<the same as short Markdown: the summary, then one bullet per step>",
  "findings": [{"severity": "high|medium|low", "path": "<file path from the diff>", "line": <line number in the new file, or null>, "title": "<one line>", "body": "<why it is a problem, citing the code>", "suggested_fix": "<what to change>", "spec": "<spec path it breaks, or null>"}]}
 Use an empty findings list when the change is fine.`;
 
@@ -332,8 +404,11 @@ async function runReview(env: Bindings, review: ReviewRow, progress: Progress) {
   statements.push(
     env.DB.prepare(
       `UPDATE reviews SET state = 'succeeded', stage = 'done', walkthrough = ?2, backend = ?3, model = ?4, head_sha = ?5, error = NULL,
-         finished_at = ${NOW} WHERE id = ?1`,
-    ).bind(review.id, answer.walkthrough, found.backend, found.model, reviewed),
+         summary = ?6, risk = ?7, risk_reason = ?8, steps = ?9, decisions = ?10, finished_at = ${NOW} WHERE id = ?1`,
+    ).bind(
+      review.id, answer.walkthrough, found.backend, found.model, reviewed,
+      answer.walk.summary, answer.walk.risk, answer.walk.riskReason, JSON.stringify(answer.walk.steps), JSON.stringify(answer.walk.decisions),
+    ),
   );
   await env.DB.batch(statements);
   const kept = verdicts.filter((v) => v.real).length;

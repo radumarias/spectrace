@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
-import { isCurrentReview, isRunning, useAgentReview, useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, useRunAgentReview, type AgentReview, type Finding, type PullDetail as Pull } from "../api/pulls";
+import { isCurrentReview, isRunning, useAgentReview, useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, useRunAgentReview, type AgentReview, type Finding, type PullDetail as Pull, type WalkStep } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
 import { Diff } from "../ui/Diff";
 import { Markdown, stripHtmlComments } from "../ui/Markdown";
@@ -92,6 +92,7 @@ export function PullDetail() {
             {p.draft && <Pill tone="idle">draft</Pill>}
             <Pill tone={CHECKS[p.checksState].tone}>{testsLabel(p)}</Pill>
             <Pill tone={pill.tone}>{pill.label}</Pill>
+            {ar?.state === "succeeded" && ar.risk && <Pill tone={RISK[ar.risk]}>risk {ar.risk.toUpperCase()}</Pill>}
             <Pill tone="idle">{p.changedFiles} {p.changedFiles === 1 ? "file" : "files"} changed</Pill>
           </div>
         </div>
@@ -226,6 +227,47 @@ function FindingList({ review }: { review: AgentReview }) {
   );
 }
 
+const IMPACT: Record<WalkStep["impact"], PillTone> = { high: "bad", medium: "warn", low: "idle" };
+const RISK: Record<NonNullable<AgentReview["risk"]>, PillTone> = { high: "bad", medium: "warn", low: "ok" };
+
+/** A diff excerpt, added lines green and removed lines red (the prototype's code block). */
+function CodeLines({ code }: { code: string }) {
+  return (
+    <pre className="code">
+      {code.split("\n").map((line, i) => (
+        <span key={i} className={line.startsWith("+") ? "l-add" : line.startsWith("-") ? "l-del" : line.trim().startsWith("//") ? "l-com" : undefined}>
+          {line}
+          {"\n"}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
+/** One numbered part of the change: what changed, what it affects, how much, and the key lines. */
+function Step({ n, step }: { n: number; step: WalkStep }) {
+  return (
+    <div className="step walk-step">
+      <span className="n">{n}</span>
+      <span className="stack-s" style={{ minWidth: 0 }}>
+        <span className="btns" style={{ gap: 6 }}>
+          <b style={{ fontFamily: "var(--f-display)" }}>{step.title}</b>
+          {step.spec && <span className="id">{step.spec}</span>}
+          <Pill tone={IMPACT[step.impact]}>{step.impact} impact</Pill>
+        </span>
+        {step.paths.length > 0 && (
+          <span className="btns" style={{ gap: 6 }}>
+            {step.paths.map((path) => <code key={path} style={{ overflowWrap: "anywhere" }}>{path}</code>)}
+          </span>
+        )}
+        {step.change && <span style={{ fontSize: 13.5 }}>{step.change}</span>}
+        {step.effect && <span className="sub" style={{ fontSize: 13 }}><b>Affects:</b> {step.effect}</span>}
+        {step.code.trim() && <CodeLines code={step.code} />}
+      </span>
+    </div>
+  );
+}
+
 function Walkthrough({ pull: p, review, gates, context, onFindings }: {
   pull: Pull;
   review: AgentReview | null | undefined;
@@ -235,33 +277,61 @@ function Walkthrough({ pull: p, review, gates, context, onFindings }: {
 }) {
   const done = review?.state === "succeeded";
   const open = done ? review.findings.length : 0;
+  const steps = done ? review.steps : [];
+  const described = stripHtmlComments(p.body).trim() !== "";
   return (
     <div className="row">
       <div className="main stack">
         <ReviewCard pull={p} review={review} />
         <Card className="stack">
           <span className="lbl">What this PR does</span>
-          {stripHtmlComments(p.body).trim() ? <Markdown fold>{p.body}</Markdown> : <p className="sub">The author did not write a description.</p>}
-          {done && review.walkthrough.trim() && (
+          {done && review.summary ? (
+            <p>{review.summary}</p>
+          ) : described ? (
+            <Markdown fold>{p.body}</Markdown>
+          ) : (
+            <p className="sub">The author did not write a description.</p>
+          )}
+          {steps.map((step, i) => <Step key={`${i}-${step.title}`} n={i + 1} step={step} />)}
+          {done && steps.length === 0 && review.walkthrough.trim() && (
             <>
               <span className="lbl">Walkthrough</span>
               <Markdown>{review.walkthrough}</Markdown>
-              {review.backend && (
-                <span className="sub" style={{ fontSize: 12 }}>
-                  Reviewed with {BACKEND[review.backend]}{review.model ? ` · ${review.model}` : ""}.
-                </span>
-              )}
             </>
           )}
+          {done && review.decisions.map((q) => (
+            <div key={q} className="btns needs-call">
+              <Pill tone="warn">needs your call</Pill>
+              <span style={{ fontSize: 13 }}>{q}</span>
+            </div>
+          ))}
           {open > 0 && (
             <div className="btns findings-banner">
               <span>{open} open {open === 1 ? "finding" : "findings"} from the reviewer.</span>
               <Button small onClick={onFindings}>See findings</Button>
             </div>
           )}
+          {done && review.backend && (
+            <span className="sub" style={{ fontSize: 12 }}>
+              Reviewed with {BACKEND[review.backend]}{review.model ? ` · ${review.model}` : ""}.
+            </span>
+          )}
         </Card>
+        {done && review.summary && described && (
+          <Card className="stack">
+            <span className="lbl">The author's description</span>
+            <Markdown fold>{p.body}</Markdown>
+          </Card>
+        )}
       </div>
       <div className="aside stack">
+        {done && review.risk && (
+          <Card className="stack">
+            <span className="lbl">Risk</span>
+            <span className="btns"><Pill tone={RISK[review.risk]}>risk {review.risk.toUpperCase()}</Pill></span>
+            {review.riskReason && <p className="sub" style={{ fontSize: 13 }}>{review.riskReason}</p>}
+          </Card>
+        )}
         <Card className="stack">
           <span className="lbl">Gates</span>
           <div className="box">

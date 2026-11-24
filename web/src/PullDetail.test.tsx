@@ -294,6 +294,7 @@ it("shows the gates, the review card and the context the reviewer would use", as
 const REVIEW = {
   id: "rv-1", pullId: "pr-1", jobId: "j1", headSha: "abc", state: "succeeded", stage: "done", backend: "user_key", model: "claude-opus-5-5", error: null,
   createdAt: "x", finishedAt: "y", dropped: 2, walkthrough: "The **declined** screen now names the reason.",
+  summary: "", risk: null, riskReason: "", steps: [], decisions: [],
   findings: [{ id: 1, severity: "high", path: "src/pay.rs", line: 7, title: "Charges twice on retry", body: "A new key per attempt.", suggestedFix: "Reuse the order key.", spec: "spec/checkout.md" }],
 };
 
@@ -320,6 +321,33 @@ it("shows a finished review: walkthrough, findings and the review gates", async 
   expect(screen.getByText("Charges twice on retry")).toBeTruthy();
   expect(screen.getByText("Reuse the order key.")).toBeTruthy();
   expect(screen.getByText("The refuters dropped 2 findings they could not confirm.")).toBeTruthy();
+});
+
+it("shows the walkthrough as numbered steps with impact, risk and questions for the owner", async () => {
+  server(PULL, 200, false, {
+    ...REVIEW,
+    summary: "Declined payments now say why, next to the retry button.",
+    risk: "medium",
+    riskReason: "Touches the payment flow, but only what is shown.",
+    steps: [
+      { title: "Declined screen", paths: ["src/checkout/Declined.tsx"], spec: "checkout.failed", impact: "medium", change: "Shows the decline reason.", effect: "Shoppers see why their card failed.", code: "- <p>Declined</p>\n+ <p>Declined: {reason}</p>" },
+      { title: "Tests", paths: ["src/checkout/Declined.test.tsx"], spec: null, impact: "low", change: "One new test.", effect: "", code: "" },
+    ],
+    decisions: ["Should the raw gateway reason be shown, or a friendlier one?"],
+  });
+  at("/pr/pr-1");
+  expect(await screen.findByText("Declined payments now say why, next to the retry button.")).toBeTruthy();
+  expect(screen.getByText("Declined screen")).toBeTruthy();
+  expect(screen.getByText("checkout.failed")).toBeTruthy();
+  expect(screen.getByText("medium impact")).toBeTruthy();
+  expect(screen.getByText("low impact")).toBeTruthy();
+  expect(screen.getByText("Shoppers see why their card failed.")).toBeTruthy();
+  expect(screen.getByText("+ <p>Declined: {reason}</p>")).toBeTruthy();
+  expect(screen.getAllByText("risk MEDIUM")).toHaveLength(2); // header and the risk card
+  expect(screen.getByText("Touches the payment flow, but only what is shown.")).toBeTruthy();
+  expect(screen.getByText("Should the raw gateway reason be shown, or a friendlier one?")).toBeTruthy();
+  // The author's own description moves below the walkthrough.
+  expect(screen.getByText("The author's description")).toBeTruthy();
 });
 
 it("offers to run again when the review is of an older commit", async () => {

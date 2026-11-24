@@ -3388,6 +3388,18 @@ export interface components {
             stage: string;
             /** @description Markdown, set once the review succeeded. */
             walkthrough: string;
+            /** @description Two or three sentences on what the PR does. Empty for reviews made before structured walkthroughs. */
+            summary: string;
+            /**
+             * @description How likely the PR breaks something if merged as it is.
+             * @enum {string|null}
+             */
+            risk: "high" | "medium" | "low" | null;
+            riskReason: string;
+            /** @description The change as numbered parts, in reading order. */
+            steps: components["schemas"]["WalkStep"][];
+            /** @description Questions the specs do not answer, for the owner. */
+            decisions: string[];
             /**
              * @description Which Claude ran it: the owner's subscription, the requester's own key, or the server's key.
              * @enum {string|null}
@@ -3401,6 +3413,21 @@ export interface components {
             findings: components["schemas"]["Finding"][];
             /** @description Findings the refuters could not confirm, left out. */
             dropped: number;
+        };
+        WalkStep: {
+            title: string;
+            paths: string[];
+            /** @description Spec id or path this part touches, when it names one. */
+            spec: string | null;
+            /**
+             * @description How much this part can change behaviour for users or other code.
+             * @enum {string}
+             */
+            impact: "high" | "medium" | "low";
+            change: string;
+            effect: string;
+            /** @description A few key lines from the diff, or empty. */
+            code: string;
         };
         Finding: {
             id: number;

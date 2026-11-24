@@ -163,3 +163,6 @@ figcaption{font:400 10px var(--f-mono);color:var(--muted)}
 .md details{margin:8px 0;border:1px solid var(--line);border-radius:8px;padding:6px 12px}
 .md summary{cursor:pointer;font-weight:600}
 .md details[open]>summary{margin-bottom:6px}
+.walk-step{cursor:default}
+.walk-step .code{margin-top:4px}
+.needs-call{padding:10px 12px;border-radius:10px;background:var(--warn-soft)}
