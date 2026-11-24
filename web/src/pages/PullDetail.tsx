@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
 import { isCurrentReview, isRunning, useAgentReview, useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, useRunAgentReview, type AgentReview, type Finding, type PullDetail as Pull, type WalkStep } from "../api/pulls";
@@ -109,7 +109,7 @@ export function PullDetail() {
         onChange={setTab}
       />
 
-      {tab === "walk" && <Walkthrough pull={p} review={ar} gates={gates} context={project.context} onFindings={() => setTab("findings")} />}
+      {tab === "walk" && <Walkthrough projectId={project.id} pull={p} review={ar} gates={gates} context={project.context} onFindings={() => setTab("findings")} />}
       {tab === "files" && <Files projectId={project.id} pull={p} />}
       {tab === "findings" && <Findings pull={p} review={ar} />}
     </div>
@@ -244,8 +244,14 @@ function CodeLines({ code }: { code: string }) {
   );
 }
 
-/** One numbered part of the change: what changed, what it affects, how much, and the key lines. */
-function Step({ n, step }: { n: number; step: WalkStep }) {
+/**
+ * One numbered part of the change, in the order a reader takes it: title, spec and impact, what changed,
+ * what it affects, then its files with their real diff from GitHub. The reviewer's excerpt is only shown
+ * for a file whose diff is not stored.
+ */
+function Step({ n, step, pull: p, diffs }: { n: number; step: WalkStep; pull: Pull; diffs: ReturnType<typeof usePullDiff> }) {
+  const files = step.paths.map((path) => ({ path, file: p.files.find((f) => f.path === path) }));
+  const unknown = files.filter((f) => !f.file).map((f) => f.path);
   return (
     <div className="step walk-step">
       <span className="n">{n}</span>
@@ -255,20 +261,24 @@ function Step({ n, step }: { n: number; step: WalkStep }) {
           {step.spec && <span className="id">{step.spec}</span>}
           <Pill tone={IMPACT[step.impact]}>{step.impact} impact</Pill>
         </span>
-        {step.paths.length > 0 && (
-          <span className="btns" style={{ gap: 6 }}>
-            {step.paths.map((path) => <code key={path} style={{ overflowWrap: "anywhere" }}>{path}</code>)}
-          </span>
-        )}
         {step.change && <span style={{ fontSize: 13.5 }}>{step.change}</span>}
         {step.effect && <span className="sub" style={{ fontSize: 13 }}><b>Affects:</b> {step.effect}</span>}
-        {step.code.trim() && <CodeLines code={step.code} />}
+        {files.map(({ path, file }) =>
+          file ? <FileRow key={path} file={file} patch={diffs.data?.get(path)} pending={diffs.isPending} htmlUrl={p.htmlUrl} defaultOpen /> : null,
+        )}
+        {unknown.length > 0 && (
+          <span className="btns" style={{ gap: 6 }}>
+            {unknown.map((path) => <code key={path} style={{ overflowWrap: "anywhere" }}>{path}</code>)}
+          </span>
+        )}
+        {(unknown.length > 0 || files.length === 0) && step.code.trim() && <CodeLines code={step.code} />}
       </span>
     </div>
   );
 }
 
-function Walkthrough({ pull: p, review, gates, context, onFindings }: {
+function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }: {
+  projectId: string;
   pull: Pull;
   review: AgentReview | null | undefined;
   gates: Gate[];
@@ -278,6 +288,7 @@ function Walkthrough({ pull: p, review, gates, context, onFindings }: {
   const done = review?.state === "succeeded";
   const open = done ? review.findings.length : 0;
   const steps = done ? review.steps : [];
+  const diffs = usePullDiff(projectId, p.id, steps.length > 0);
   const described = stripHtmlComments(p.body).trim() !== "";
   return (
     <div className="row">
@@ -292,7 +303,8 @@ function Walkthrough({ pull: p, review, gates, context, onFindings }: {
           ) : (
             <p className="sub">The author did not write a description.</p>
           )}
-          {steps.map((step, i) => <Step key={`${i}-${step.title}`} n={i + 1} step={step} />)}
+          {steps.map((step, i) => <Step key={`${i}-${step.title}`} n={i + 1} step={step} pull={p} diffs={diffs} />)}
+          {diffs.error && <p className="err" role="alert">{diffs.error.message}</p>}
           {done && steps.length === 0 && review.walkthrough.trim() && (
             <>
               <span className="lbl">Walkthrough</span>
@@ -379,53 +391,50 @@ function Walkthrough({ pull: p, review, gates, context, onFindings }: {
   );
 }
 
+type PullFile = Pull["files"][number];
+
+/** One changed file: a header with its status and counts, and its diff when open. */
+function FileRow({ file: f, patch, pending, htmlUrl, defaultOpen = false }: { file: PullFile; patch: string | null | undefined; pending: boolean; htmlUrl: string; defaultOpen?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultOpen);
+  const id = useId();
+  return (
+    <div className="card file">
+      <button className="file-head" type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((e) => !e)}>
+        <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+        <span className="file-name">
+          <code>{f.path}</code>
+          {f.previousPath && <span className="mono sub" style={{ fontSize: 11 }}>from {f.previousPath}</span>}
+        </span>
+        <Pill tone={f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "idle"}>{f.status}</Pill>
+        <span className="mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+          <span style={{ color: "var(--ok)" }}>+{f.additions}</span> <span style={{ color: "var(--bad)" }}>−{f.deletions}</span>
+        </span>
+      </button>
+      {expanded && (
+        <div id={id} className="file-body">
+          {pending ? (
+            <p className="sub pad">Loading the changes…</p>
+          ) : patch ? (
+            <Diff patch={patch} />
+          ) : (
+            <p className="sub pad">
+              No diff to show here: the file is binary, empty, or too large.{" "}
+              <a href={`${htmlUrl}/files`} target="_blank" rel="noreferrer">View it on GitHub</a>
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Files({ projectId, pull: p }: { projectId: string; pull: Pull }) {
   const diffs = usePullDiff(projectId, p.id, true);
-  const [open, setOpen] = useState<Set<string>>(new Set());
   if (p.files.length === 0) return <Card><p className="sub">No changed files are stored for this pull request yet.</p></Card>;
-  const toggle = (path: string) =>
-    setOpen((o) => {
-      const next = new Set(o);
-      if (!next.delete(path)) next.add(path);
-      return next;
-    });
   return (
     <div className="stack">
       {diffs.error && <p className="err" role="alert">{diffs.error.message}</p>}
-      {p.files.map((f) => {
-        const expanded = open.has(f.path);
-        const patch = diffs.data?.get(f.path);
-        const id = `diff-${f.path}`;
-        return (
-          <div className="card file" key={f.path}>
-            <button className="file-head" type="button" aria-expanded={expanded} aria-controls={id} onClick={() => toggle(f.path)}>
-              <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
-              <span className="file-name">
-                <code>{f.path}</code>
-                {f.previousPath && <span className="mono sub" style={{ fontSize: 11 }}>from {f.previousPath}</span>}
-              </span>
-              <Pill tone={f.status === "added" ? "ok" : f.status === "removed" ? "bad" : "idle"}>{f.status}</Pill>
-              <span className="mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
-                <span style={{ color: "var(--ok)" }}>+{f.additions}</span> <span style={{ color: "var(--bad)" }}>−{f.deletions}</span>
-              </span>
-            </button>
-            {expanded && (
-              <div id={id} className="file-body">
-                {diffs.isPending ? (
-                  <p className="sub pad">Loading the changes…</p>
-                ) : patch ? (
-                  <Diff patch={patch} />
-                ) : (
-                  <p className="sub pad">
-                    No diff to show here: the file is binary, empty, or too large.{" "}
-                    <a href={`${p.htmlUrl}/files`} target="_blank" rel="noreferrer">View it on GitHub</a>
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {p.files.map((f) => <FileRow key={f.path} file={f} patch={diffs.data?.get(f.path)} pending={diffs.isPending} htmlUrl={p.htmlUrl} />)}
     </div>
   );
 }
