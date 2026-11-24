@@ -17,7 +17,7 @@ import { PermanentError, registerHandler, type JobHandler } from "./queue";
 export const SYNC_KIND = "sync";
 const PAGE_SIZE = 100;
 /** GitHub stops listing a PR's files after 3000. */
-const MAX_FILE_PAGES = 30;
+export const MAX_FILE_PAGES = 30;
 /** How many pages (of 100) of recently closed PRs a sync reads. */
 const RECENT_CLOSED_PAGES = 1;
 const MAX_CHECK_PAGES = 5;
@@ -27,7 +27,7 @@ interface RepoRow {
   full_name: string;
 }
 
-async function ghPages<T>(app: AppConfig, token: string, what: string, path: string, maxPages = Infinity): Promise<T[]> {
+export async function ghPages<T>(app: AppConfig, token: string, what: string, path: string, maxPages = Infinity): Promise<T[]> {
   const out: T[] = [];
   for (let page = 1; page <= maxPages; page++) {
     const sep = path.includes("?") ? "&" : "?";
