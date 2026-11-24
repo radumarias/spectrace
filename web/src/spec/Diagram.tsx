@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { decorate, mount, parseClicks } from "./actions";
 import { useToast } from "../ui/Toast";
+import { ExpandButton, FullScreen } from "../ui/FullScreen";
+import { createPortal } from "react-dom";
 import type { StepStatus } from "./model";
 
 type Pele = typeof import("./pele");
@@ -31,6 +33,8 @@ export interface DiagramProps {
   vertical?: boolean;
   /** Where the zoom controls go; given the controls, returns what to render next to the drawing. */
   tools?: (zoom: ReactNode) => ReactNode;
+  /** A button on the drawing opens it full screen (default: yes, unless it already is). */
+  expandable?: boolean;
 }
 
 const MIN_ZOOM = 0.25;
@@ -47,7 +51,9 @@ function nodeOfHref(href: string): string | null {
   return m ? m[1]! : null;
 }
 
-export function Diagram({ source, label, status, selected, onSelect, fill, vertical, tools }: DiagramProps) {
+export function Diagram({ source, label, status, selected, onSelect, fill, vertical, tools, expandable = true }: DiagramProps) {
+  const [expanded, setExpanded] = useState(false);
+  const closeExpanded = useCallback(() => setExpanded(false), []);
   const prefix = `d${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const box = useRef<HTMLDivElement>(null);
   const [drawn, setDrawn] = useState<{ svg: string; width: number; height: number } | null>(null);
@@ -265,6 +271,8 @@ export function Diagram({ source, label, status, selected, onSelect, fill, verti
   }
   return (
     <>
+      <div className={fill ? "dia-host fill" : "dia-host"}>
+      {expandable && !fill && drawn && <ExpandButton label={label} onClick={() => setExpanded(true)} />}
       <div
         ref={box}
         className={`spec-dia${fill ? " fill" : ""}`}
@@ -282,7 +290,25 @@ export function Diagram({ source, label, status, selected, onSelect, fill, verti
       >
         {drawn ? undefined : null}
       </div>
+      </div>
       {tools?.(zoom)}
+      {expanded && (
+        <FullScreen title={label} onClose={closeExpanded}>
+          {(tall, slot) => (
+            <Diagram
+              key={tall ? "v" : "h"}
+              source={source}
+              label={label}
+              status={status}
+              selected={selected}
+              onSelect={onSelect}
+              fill
+              vertical={tall}
+              tools={(z) => (slot ? createPortal(z, slot) : null)}
+            />
+          )}
+        </FullScreen>
+      )}
     </>
   );
 }
