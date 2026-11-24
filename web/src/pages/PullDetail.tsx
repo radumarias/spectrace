@@ -4,6 +4,7 @@ import { useCurrentProject } from "../api/queries";
 import { isCurrentReview, isRunning, useAgentReview, useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, useRunAgentReview, type AgentReview, type Finding, type PullDetail as Pull, type WalkStep } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
 import { Diff } from "../ui/Diff";
+import { Inline } from "../ui/Inline";
 import { Markdown, stripHtmlComments } from "../ui/Markdown";
 import { useToast } from "../ui/Toast";
 
@@ -207,12 +208,12 @@ function FindingList({ review }: { review: AgentReview }) {
               {f.path && <code style={{ overflowWrap: "anywhere" }}>{f.path}{f.line ? `:${f.line}` : ""}</code>}
               {f.spec && <span className="id">{f.spec}</span>}
             </div>
-            <b>{f.title}</b>
-            {f.body && <p>{f.body}</p>}
+            <b className="finding-title"><Inline>{f.title}</Inline></b>
+            {f.body && <p><Inline>{f.body}</Inline></p>}
             {f.suggestedFix && (
               <div className="box">
                 <span className="mh">suggested fix</span>
-                {f.suggestedFix}
+                <span><Inline>{f.suggestedFix}</Inline></span>
               </div>
             )}
           </Card>
@@ -257,12 +258,16 @@ function Step({ n, step, pull: p, diffs }: { n: number; step: WalkStep; pull: Pu
       <span className="n">{n}</span>
       <span className="stack-s" style={{ minWidth: 0 }}>
         <span className="btns" style={{ gap: 6 }}>
-          <b style={{ fontFamily: "var(--f-display)" }}>{step.title}</b>
+          <b className="walk-title"><Inline>{step.title}</Inline></b>
           {step.spec && <span className="id">{step.spec}</span>}
           <Pill tone={IMPACT[step.impact]}>{step.impact} impact</Pill>
         </span>
-        {step.change && <span style={{ fontSize: 13.5 }}>{step.change}</span>}
-        {step.effect && <span className="sub" style={{ fontSize: 13 }}><b>Affects:</b> {step.effect}</span>}
+        {step.change && <p className="walk-change"><Inline>{step.change}</Inline></p>}
+        {step.effect && (
+          <p className="walk-effect">
+            <span className="lbl">Affects</span> <Inline>{step.effect}</Inline>
+          </p>
+        )}
         {files.map(({ path, file }) =>
           file ? <FileRow key={path} file={file} patch={diffs.data?.get(path)} pending={diffs.isPending} htmlUrl={p.htmlUrl} defaultOpen /> : null,
         )}
@@ -297,7 +302,7 @@ function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }:
         <Card className="stack">
           <span className="lbl">What this PR does</span>
           {done && review.summary ? (
-            <p>{review.summary}</p>
+            <p className="walk-summary"><Inline>{review.summary}</Inline></p>
           ) : described ? (
             <Markdown fold>{p.body}</Markdown>
           ) : (
@@ -314,7 +319,7 @@ function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }:
           {done && review.decisions.map((q) => (
             <div key={q} className="btns needs-call">
               <Pill tone="warn">needs your call</Pill>
-              <span style={{ fontSize: 13 }}>{q}</span>
+              <span style={{ fontSize: 13.5 }}><Inline>{q}</Inline></span>
             </div>
           ))}
           {open > 0 && (
@@ -341,7 +346,7 @@ function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }:
           <Card className="stack">
             <span className="lbl">Risk</span>
             <span className="btns"><Pill tone={RISK[review.risk]}>risk {review.risk.toUpperCase()}</Pill></span>
-            {review.riskReason && <p className="sub" style={{ fontSize: 13 }}>{review.riskReason}</p>}
+            {review.riskReason && <p style={{ fontSize: 13.5 }}><Inline>{review.riskReason}</Inline></p>}
           </Card>
         )}
         <Card className="stack">
