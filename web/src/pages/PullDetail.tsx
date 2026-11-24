@@ -241,7 +241,7 @@ function Walkthrough({ pull: p, review, gates, context, onFindings }: {
         <ReviewCard pull={p} review={review} />
         <Card className="stack">
           <span className="lbl">What this PR does</span>
-          {stripHtmlComments(p.body).trim() ? <Markdown>{p.body}</Markdown> : <p className="sub">The author did not write a description.</p>}
+          {stripHtmlComments(p.body).trim() ? <Markdown fold>{p.body}</Markdown> : <p className="sub">The author did not write a description.</p>}
           {done && review.walkthrough.trim() && (
             <>
               <span className="lbl">Walkthrough</span>
