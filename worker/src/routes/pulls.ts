@@ -8,7 +8,9 @@ import { appConfigFromEnv, ghHeaders, installationToken } from "../github-app";
 import { checkRunsOf, checksState } from "../checks";
 import { pullGates } from "../gates";
 import { enqueueJob, type JobRow } from "../jobs/queue";
-import { installationFor, SYNC_KIND } from "../jobs/sync";
+import { ghPages, installationFor, MAX_FILE_PAGES, SYNC_KIND } from "../jobs/sync";
+import { log } from "../log";
+import { MAX_PATCH_CHARS, type GhFile } from "../pulls";
 import { Job, toJob } from "./jobs";
 import { requireProjectOwner } from "./projects";
 
@@ -333,6 +335,22 @@ export async function github(env: Bindings, projectId: string, fullName: string,
   return { status: res.status, json };
 }
 
+/** Each file's diff as GitHub has it now, or null when GitHub cannot be asked (no installation, an error); never throws. */
+async function patchesFromGithub(env: Bindings, projectId: string, fullName: string, number: number): Promise<Map<string, string> | null> {
+  try {
+    const installationId = await installationFor(env, projectId, fullName);
+    if (installationId === null) return null;
+    const app = appConfigFromEnv(env);
+    const token = await installationToken(app, installationId);
+    if (token === null) return null;
+    const files = await ghPages<GhFile>(app, token, `files of ${fullName}#${number}`, `/repos/${fullName}/pulls/${number}/files`, MAX_FILE_PAGES);
+    return new Map(files.flatMap((f) => (f.patch ? [[f.filename, f.patch] as const] : [])));
+  } catch (cause) {
+    log("warn", "diff: could not read the files from GitHub", { fullName, number, error: String(cause) });
+    return null;
+  }
+}
+
 const message = (json: Record<string, unknown>) => (typeof json.message === "string" ? json.message : "GitHub refused");
 
 interface ReviewRow {
@@ -448,10 +466,28 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
   app.openapi(diff, async (c) => {
     const { projectId, pullId } = c.req.valid("param");
     await requireProjectOwner(c.env.DB, (await requireUser(c)).id, projectId);
-    const found = await c.env.DB.prepare("SELECT 1 AS x FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id WHERE r.project_id = ?1 AND p.id = ?2").bind(projectId, pullId).first();
+    const found = await c.env.DB.prepare("SELECT p.number, r.full_name FROM pull_requests p JOIN project_repos r ON r.id = p.repo_id WHERE r.project_id = ?1 AND p.id = ?2")
+      .bind(projectId, pullId)
+      .first<{ number: number; full_name: string }>();
     if (!found) throw AppError.notFound(`pull request ${pullId}`);
-    const { results } = await c.env.DB.prepare("SELECT path, patch FROM pr_files WHERE pull_request_id = ?1 ORDER BY path").bind(pullId).all<{ path: string; patch: string | null }>();
-    return c.json({ files: results }, 200);
+    const { results } = await c.env.DB.prepare("SELECT path, patch, additions, deletions FROM pr_files WHERE pull_request_id = ?1 ORDER BY path")
+      .bind(pullId)
+      .all<{ path: string; patch: string | null; additions: number; deletions: number }>();
+    // Files read before diffs were stored (or by a sync that skipped them) have none: ask GitHub once and keep what it returns.
+    if (results.some((f) => f.patch === null && f.additions + f.deletions > 0)) {
+      const fetched = await patchesFromGithub(c.env, projectId, found.full_name, found.number);
+      if (fetched) {
+        const updates: D1PreparedStatement[] = [];
+        for (const f of results) {
+          const patch = fetched.get(f.path);
+          if (f.patch !== null || !patch) continue;
+          f.patch = patch;
+          if (patch.length <= MAX_PATCH_CHARS) updates.push(c.env.DB.prepare("UPDATE pr_files SET patch = ?3 WHERE pull_request_id = ?1 AND path = ?2").bind(pullId, f.path, patch));
+        }
+        if (updates.length) await c.env.DB.batch(updates);
+      }
+    }
+    return c.json({ files: results.map((f) => ({ path: f.path, patch: f.patch })) }, 200);
   });
 
   app.openapi(get, async (c) => {

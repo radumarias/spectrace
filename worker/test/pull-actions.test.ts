@@ -24,6 +24,13 @@ function mockGithub() {
       return Response.json({ token: "ghs_test", expires_at: new Date(Date.now() + 3_600_000).toISOString() }, { status: 201 });
     }
     if (req.headers.get("authorization") !== "Bearer ghs_test") return Response.json({}, { status: 401 });
+    if (req.method === "GET" && url.pathname.endsWith("/files")) {
+      sent.push({ method: req.method, path: url.pathname, body: {} });
+      return Response.json([
+        { filename: "b.ts", status: "modified", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-a\n+b" },
+        { filename: "a.png", status: "added", additions: 0, deletions: 0 },
+      ]);
+    }
     sent.push({ method: req.method, path: url.pathname, body: (await req.json()) as Record<string, unknown> });
     const reply = url.pathname.endsWith("/merge") ? mergeReply : reviewReply;
     return Response.json(reply.json, { status: reply.status });
@@ -238,5 +245,26 @@ describe("POST .../merge", () => {
     expect((await post(s, "/merge")).status).toBe(502);
     expect((await call(`${s.base}/merge`, null, { method: "POST" })).status).toBe(401);
     expect((await call(`${s.base}/merge`, (await seed()).cookie, { method: "POST" })).status).toBe(404);
+  });
+});
+
+describe("GET .../diff", () => {
+  it("reads diffs missing from storage from GitHub once, and keeps them", async () => {
+    const s = await seed();
+    await env.DB.prepare("INSERT INTO pr_files (pull_request_id, path, status, additions, deletions) VALUES (?1, 'b.ts', 'modified', 1, 1), (?1, 'a.png', 'added', 0, 0)").bind(s.pullId).run();
+    const want = { files: [{ path: "a.png", patch: null }, { path: "b.ts", patch: "@@ -1 +1 @@\n-a\n+b" }] };
+    const first = await call(`${s.base}/diff`, s.cookie);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toEqual(want);
+    expect(sent).toEqual([{ method: "GET", path: "/repos/acme/shop/pulls/7/files", body: {} }]);
+    expect(await (await call(`${s.base}/diff`, s.cookie)).json()).toEqual(want);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("serves what is stored when no installation can read GitHub", async () => {
+    const s = await seed({ installation: false });
+    await env.DB.prepare("INSERT INTO pr_files (pull_request_id, path, status, additions, deletions) VALUES (?1, 'b.ts', 'modified', 1, 1)").bind(s.pullId).run();
+    expect(await (await call(`${s.base}/diff`, s.cookie)).json()).toEqual({ files: [{ path: "b.ts", patch: null }] });
+    expect(sent).toEqual([]);
   });
 });
