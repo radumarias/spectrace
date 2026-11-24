@@ -3428,6 +3428,12 @@ export interface components {
             effect: string;
             /** @description A few key lines from the diff, or empty. */
             code: string;
+            /** @description The new-file line ranges of each file that belong to this part; empty when the whole files do (and for reviews made before ranges). */
+            lines: {
+                path: string;
+                start: number;
+                end: number;
+            }[];
         };
         Finding: {
             id: number;

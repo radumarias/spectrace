@@ -133,7 +133,7 @@ interface ReviewBody {
     summary: string;
     risk: string | null;
     riskReason: string;
-    steps: { title: string; paths: string[]; spec: string | null; impact: string; change: string; effect: string; code: string }[];
+    steps: { title: string; paths: string[]; spec: string | null; impact: string; change: string; effect: string; code: string; lines: { path: string; start: number; end: number }[] }[];
     decisions: string[];
     backend: string | null;
     error: string | null;
@@ -150,7 +150,7 @@ beforeEach(() => {
     risk: "high",
     risk_reason: "A retry can charge the card twice.",
     steps: [
-      { title: "Pay", paths: ["src/checkout.rs"], spec: "checkout.pay", impact: "high", change: "pay() makes its own key.", effect: "Retries are no longer idempotent.", code: "- let key = o.idempotency_key();\n+ let key = Uuid::new_v4();" },
+      { title: "Pay", paths: ["src/checkout.rs"], spec: "checkout.pay", impact: "high", change: "pay() makes its own key.", effect: "Retries are no longer idempotent.", code: "- let key = o.idempotency_key();\n+ let key = Uuid::new_v4();", lines: [{ path: "src/checkout.rs", start: 12, end: 16 }, { path: "other.rs", start: 1, end: 2 }, { path: "src/checkout.rs", start: 9, end: 3 }] },
     ],
     decisions: ["Should a retry reuse the order's key?"],
     walkthrough: "- `src/checkout.rs`: pay() now makes its own key.",
@@ -184,7 +184,7 @@ describe("review job", () => {
       decisions: ["Should a retry reuse the order's key?"],
     });
     expect(body.review!.steps).toEqual([
-      { title: "Pay", paths: ["src/checkout.rs"], spec: "checkout.pay", impact: "high", change: "pay() makes its own key.", effect: "Retries are no longer idempotent.", code: "- let key = o.idempotency_key();\n+ let key = Uuid::new_v4();" },
+      { title: "Pay", paths: ["src/checkout.rs"], spec: "checkout.pay", impact: "high", change: "pay() makes its own key.", effect: "Retries are no longer idempotent.", code: "- let key = o.idempotency_key();\n+ let key = Uuid::new_v4();", lines: [{ path: "src/checkout.rs", start: 12, end: 16 }] },
     ]);
     expect(body.review!.findings).toEqual([
       expect.objectContaining({ severity: "high", title: BUG.title, path: "src/checkout.rs", line: 15, suggestedFix: BUG.suggested_fix, spec: "spec/checkout.md" }),
@@ -299,7 +299,7 @@ describe("parsing model answers", () => {
     expect(out.walk.risk).toBe("high");
     expect(out.walk.decisions).toEqual(["q"]);
     expect(out.walk.steps).toHaveLength(1);
-    expect(out.walk.steps[0]).toMatchObject({ title: "A", paths: ["a.ts"], spec: null, impact: "medium", change: "", effect: "" });
+    expect(out.walk.steps[0]).toMatchObject({ title: "A", paths: ["a.ts"], spec: null, impact: "medium", change: "", effect: "", lines: [] });
     expect(out.walk.steps[0]!.code.split("\n")).toHaveLength(13);
     expect(out.walk.steps[0]!.code.startsWith("+ line 0")).toBe(true);
     // An older answer with only Markdown still reads, with no steps and no risk.

@@ -34,6 +34,9 @@ const WalkStep = z
     change: z.string(),
     effect: z.string(),
     code: z.string().openapi({ description: "A few key lines from the diff, or empty." }),
+    lines: z
+      .array(z.object({ path: z.string(), start: z.number().int(), end: z.number().int() }))
+      .openapi({ description: "The new-file line ranges of each file that belong to this part; empty when the whole files do (and for reviews made before ranges)." }),
   })
   .openapi("WalkStep");
 
@@ -155,7 +158,7 @@ async function toReview(env: Bindings, r: ReviewRow): Promise<z.infer<typeof Age
     summary: r.summary,
     risk: r.risk,
     riskReason: r.risk_reason,
-    steps: jsonArray(r.steps) as z.infer<typeof WalkStep>[],
+    steps: (jsonArray(r.steps) as z.infer<typeof WalkStep>[]).map((s) => ({ ...s, lines: Array.isArray(s.lines) ? s.lines : [] })),
     decisions: jsonArray(r.decisions).filter((d): d is string => typeof d === "string"),
     backend: r.backend,
     model: r.model,

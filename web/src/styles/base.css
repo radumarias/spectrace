@@ -175,3 +175,19 @@ code.ic{font:500 .88em var(--f-mono);background:var(--sunk);border:1px solid var
 .walk-effect .lbl{color:var(--accent);margin-right:4px}
 .walk-step .n{font-size:16px}
 .finding-title{font:600 15.5px/1.35 var(--f-display)}
+.dl-gap{color:var(--muted);background:var(--idle-soft)}.dl-gap .dt{grid-column:1/-1;padding:2px 12px;font-style:italic}
+.diff-more{display:flex;flex-wrap:wrap;gap:4px 16px;padding:6px 12px;border-top:1px solid var(--line);font-size:12.5px}
+.linkish{background:none;border:0;padding:0;color:var(--accent);font:inherit;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.walk-head{all:unset;cursor:pointer;display:block;min-width:0;border-radius:6px}
+.walk-head:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.walk-caret{color:var(--muted);font-size:12px;width:12px}
+.walk-step.folded{padding-top:8px;padding-bottom:8px}
+.walk-step{scroll-margin-top:12px}
+.walk-nav{display:flex;flex-direction:column;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.walk-toc{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.walk-toc button{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:999px;padding:3px 10px;font-size:12.5px;cursor:pointer;max-width:100%;text-align:left}
+.walk-toc button:hover{border-color:var(--accent)}
+.walk-toc button.done{color:var(--muted)}
+.walk-toc .mono{color:var(--accent)}
+.walk-toc .dot{width:7px;height:7px;border-radius:50%;flex:none}
+.dot.d-high{background:var(--bad)}.dot.d-medium{background:var(--warn)}.dot.d-low{background:var(--muted)}
