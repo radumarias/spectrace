@@ -342,7 +342,15 @@ it("shows the walkthrough as numbered steps with impact, risk and questions for 
   expect(screen.getByText("medium impact")).toBeTruthy();
   expect(screen.getByText("low impact")).toBeTruthy();
   expect(screen.getByText("Shoppers see why their card failed.")).toBeTruthy();
-  expect(screen.getByText("+ <p>Declined: {reason}</p>")).toBeTruthy();
+  // The step's file shows its real diff from GitHub, open, after the change and what it affects.
+  const diff = await screen.findByRole("table", { name: "Changes" });
+  expect(diff.textContent).toContain("return <p>Declined: {reason}</p>;");
+  const step = screen.getByText("Declined screen").closest(".walk-step")!;
+  const text = step.textContent!;
+  expect(text.indexOf("Shows the decline reason.")).toBeLessThan(text.indexOf("Shoppers see why"));
+  expect(text.indexOf("Shoppers see why")).toBeLessThan(text.indexOf("src/checkout/Declined.tsx"));
+  // The reviewer's own excerpt is not repeated when the real diff is there.
+  expect(screen.queryByText("+ <p>Declined: {reason}</p>")).toBeNull();
   expect(screen.getAllByText("risk MEDIUM")).toHaveLength(2); // header and the risk card
   expect(screen.getByText("Touches the payment flow, but only what is shown.")).toBeTruthy();
   expect(screen.getByText("Should the raw gateway reason be shown, or a friendlier one?")).toBeTruthy();
