@@ -3,13 +3,14 @@
 // for the selected step. `/spec` opens the project's spec (or lists them when
 // there are several); `/spec/<id>?step=<node>&tab=<tab>` keeps the selection in
 // the address.
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useCurrentProject } from "../api/queries";
 import { useSaveSpec, useSpec, useSpecs, type SpecAnchor, type SpecDetail, type SpecSummary } from "../api/specs";
 import { Button, Card, Pill, Tabs } from "../ui/parts";
 import { Diagram } from "../spec/Diagram";
+import { FullScreen } from "../ui/FullScreen";
 import { SpecMarkdown } from "../spec/SpecMarkdown";
 import { githubLine, itemName, mermaidOf, STATUS_LABEL, STATUS_TONE, stepsOf, type Step, type StepStatus } from "../spec/model";
 
@@ -220,58 +221,6 @@ function Inspector({ spec, step, onTab }: { spec: SpecDetail; step: Step; onTab:
   );
 }
 
-/** The diagram on its own screen, as in the prototype: Esc or Exit closes it, tall screens draw it top to bottom. */
-function FullScreen({
-  title,
-  onClose,
-  foot,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  foot: ReactNode;
-  children: (vertical: boolean, zoomSlot: HTMLElement | null) => ReactNode;
-}) {
-  const [vertical, setVertical] = useState(() => window.innerHeight > window.innerWidth * 1.15);
-  const [slot, setSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    const onResize = () => setVertical(window.innerHeight > window.innerWidth * 1.15);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("resize", onResize);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", onResize);
-    };
-  }, [onClose]);
-  return (
-    <div className="fs" role="dialog" aria-modal="true" aria-labelledby="fs-title">
-      <div className="fs-bar">
-        <button type="button" className="btn sm fs-x" onClick={onClose} aria-label="Exit full screen">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-          <span className="fs-xl">
-            Exit <span className="mono sub">Esc</span>
-          </span>
-        </button>
-        <h2 id="fs-title">{title}</h2>
-        <div ref={setSlot} />
-      </div>
-      <div className="fs-body">{children(vertical, slot)}</div>
-      <div className="fs-foot">
-        <div className="fs-sum" aria-live="polite">{foot}</div>
-        <div className="fs-extra">
-          <span className="sub" style={{ fontSize: 12 }}>
-            Scroll or pinch to zoom · drag to move
-          </span>
-          <Legend />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 const FS_ICON = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
     <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
@@ -384,6 +333,7 @@ export function SpecPage() {
               status={status}
               selected={step?.node}
               onSelect={select}
+              expandable={false}
               tools={(zoom) => (
                 <div className="dia-tools">
                   {zoom}
@@ -439,6 +389,7 @@ export function SpecPage() {
         <FullScreen
           title={flowTitle}
           onClose={closeFs}
+          extra={<Legend />}
           foot={
             step && (
               <>

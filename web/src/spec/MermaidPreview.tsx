@@ -1,10 +1,13 @@
 // Any Mermaid diagram pele draws (the renderer devpage uses), with its
 // diagram type loaded on demand. Used by the whiteboard and requirements views.
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
+import { ExpandButton, FullScreen, PanZoom } from "../ui/FullScreen";
 
 /** Any Mermaid diagram pele draws, loaded with its diagram type on demand. */
 export function MermaidPreview({ text, label }: { text: string; label: string }) {
   const prefix = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const [open, setOpen] = useState(false);
+  const close = useCallback(() => setOpen(false), []);
   const [out, setOut] = useState<{ svg: string } | { error: string } | null>(null);
   useEffect(() => {
     let live = true;
@@ -21,6 +24,16 @@ export function MermaidPreview({ text, label }: { text: string; label: string })
   if (!out) return <p className="sub">Drawing…</p>;
   if ("error" in out) return <p className="dia-error" role="alert">{out.error}</p>;
   // pele builds the SVG from the board's own text and escapes labels.
-  return <div className="board-svg" role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: out.svg }} />;
+  return (
+    <div className="dia-host">
+      <ExpandButton label={label} onClick={() => setOpen(true)} />
+      <div className="board-svg" role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: out.svg }} />
+      {open && (
+        <FullScreen title={label} onClose={close}>
+          {() => <PanZoom html={out.svg} label={label} />}
+        </FullScreen>
+      )}
+    </div>
+  );
 }
 

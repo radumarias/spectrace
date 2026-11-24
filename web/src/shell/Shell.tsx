@@ -15,7 +15,26 @@ function Badge({ id, needs }: { id: string; needs: number }) {
   return (id === "home" || id === "prs") && needs > 0 ? <span className="bd">{needs}</span> : null;
 }
 
+const NAV_KEY = "spectrace.nav.collapsed";
+const readCollapsed = () => {
+  try {
+    return localStorage.getItem(NAV_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+
 export function Shell() {
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const toggleNav = () =>
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(NAV_KEY, c ? "0" : "1");
+      } catch {
+        // Private windows may refuse storage; the choice then lasts for this visit.
+      }
+      return !c;
+    });
   const { pathname } = useLocation();
   const route = pathname.split("/")[1] ?? "";
   const root = ROOT_ROUTES.includes(route);
@@ -37,7 +56,7 @@ export function Shell() {
   }, [pathname]);
 
   return (
-    <div className={root ? "shell root" : "shell"}>
+    <div className={root ? "shell root" : collapsed ? "shell collapsed" : "shell"}>
       <header className="top">
         <NavLink className="brand" to="/projects" aria-label="spectrace home">
           <svg width="24" height="24" viewBox="0 0 26 26" aria-hidden="true">
@@ -73,7 +92,11 @@ export function Shell() {
 
       {!root && (
         <nav className="side" aria-label="Main">
-          <NavLink to="/projects" className="back">
+          <button type="button" className="side-toggle" aria-expanded={!collapsed} aria-label={collapsed ? "Expand menu" : "Collapse menu"} title={collapsed ? "Expand menu" : "Collapse menu"} onClick={toggleNav}>
+            <Icon name="panel" size={16} />
+            <span>Collapse menu</span>
+          </button>
+          <NavLink to="/projects" className="back" title="All projects">
             <Icon name="back" size={16} />
             <span>All projects</span>
           </NavLink>
@@ -88,7 +111,7 @@ export function Shell() {
             <div key={g.title} style={{ display: "contents" }}>
               <span className="sect">{g.title}</span>
               {g.items.map((it) => (
-                <NavLink key={it.id} to={`/${it.id}`} className={({ isActive }) => (isActive || (it.id === "prs" && route === "pr") ? "on" : "")}>
+                <NavLink key={it.id} to={`/${it.id}`} title={it.label} className={({ isActive }) => (isActive || (it.id === "prs" && route === "pr") ? "on" : "")}>
                   <Icon name={it.id} />
                   <span>{it.label}</span>
                   <Badge id={it.id} needs={needs} />
