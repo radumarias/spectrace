@@ -17,7 +17,7 @@ These are the choices the rest of the work builds on. Everything below follows f
 5. **Edge labels are required.** An edge is identified by its source, label and target, so `pay -->|declined| failed` and `pay -->|ok| paid` are different edges even from the same node.
 6. **One behaviour per requirement line.** `WHEN … THE SYSTEM SHALL … . {#rN}`, exactly one WHEN and one SHALL, on one logical line. A list item that looks like a requirement but does not parse is an error, so a typo can never silently drop a requirement.
 7. **The reason for a step is a `> @flow` quote in the spec.** The `@flow` comment in code is only an anchor with a short note. The spec holds the canonical reason, the code points at it.
-8. **`#[spec("id")]` is the single anchor attribute, for code and tests.** On a test function it means "this test covers that requirement". On any other function it means "this code implements that step". Rust only in v1. This needs a small no-op `spec` attribute macro so annotated code still compiles. The parser reads source text and does not need it.
+8. **`#[spec("id")]` is the single anchor attribute, for code and tests.** On a test function it means "this test covers that requirement". On any other function it means "this code implements that step". Rust only in v1. Annotated code compiles with the no-op `spec` attribute from the [`codespec-rust-macro`](https://crates.io/crates/codespec-rust-macro) crate (MIT), the one devpage uses too. The parser reads source text and does not need it.
 9. **Node positions are not in the spec.** The prototype saves a layout when you drag nodes. In the real format that belongs in a sidecar (`spec/checkout.layout.json`, written by the diagram editor), so moving a box never shows up as a spec change in review. The Mermaid layout direction (`LR`) stays in the spec.
 
 ## File layout
@@ -148,6 +148,7 @@ fn retry_limit_is_3() { ... }
 ### `#[spec("<id>")]`
 
 - The argument is one or more string literals, either `#[spec("a", "b")]` or several `#[spec(...)]` attributes. Each is a step id or a requirement id.
+- Write one id per attribute and repeat the attribute for more. Both forms are valid here, but devpage reads only the first id of `#[spec("a", "b")]` ([Using spectrace with devpage](#using-spectrace-with-devpage)).
 - It applies to the item it decorates (function, method, `impl` block, `mod`).
 - **Coverage anchor.** If the item also has a test attribute (`#[test]`, `#[tokio::test]`, or any attribute ending in `::test`), the anchor says the test covers that id. A test anchored to a step id covers every requirement of that step.
 - **Implementation anchor.** Otherwise it says the item implements that id.
@@ -161,6 +162,29 @@ fn retry_limit_is_3() { ... }
 ```
 
 A line comment (`//` or `///`) containing `@flow`, a step id, a colon and a one-line note. It marks the exact spot where a step's non-obvious decision is made, and the note says what the code does there. It is not a requirement anchor and does not count as coverage. The note is not compared with the spec's `@flow` quote, which stays the source of the reason.
+
+## Using spectrace with devpage
+
+[devpage](https://github.com/andrei512/devpage) serves a repository's Markdown as live docs, and its [requirements check](https://github.com/andrei512/devpage/blob/main/docs/boxes/viewer/check/checking-requirements/README.md) reads the same `#[spec("<id>")]` anchors: `devpage check` fails when a constraint page has no test pointing at it, a test names an id no constraint has, or a test fails. One set of anchors serves both tools when they follow three rules.
+
+1. **Point devpage at test files only.** devpage counts every match in a suite's `glob` as a test pointing at a constraint, and cannot tell a coverage anchor from an implementation anchor. Give it the folders that hold only tests (`tests/**/*.rs`), never `src/`, or each implementation anchor there counts as a test.
+2. **Tests name requirement ids.** devpage's constraints are requirements, so a test anchored to a step id (`checkout.failed`) is reported there as `no constraint has this id`. Anchor tests to `checkout.failed/r2`; steps stay for implementation anchors.
+3. **One id per `#[spec]`.** devpage's pattern takes one id per match.
+
+devpage accepts any string as an id, so spectrace's ids work unchanged. The suite for a site's `devpage.yml`, as in [`fixtures/shop/devpage-requirements.yml`](../fixtures/shop/devpage-requirements.yml):
+
+```yaml
+extensions:
+  requirements:
+    config:
+      tests:
+        - name: rust
+          glob: "../tests/**/*.rs"   # relative to the devpage.yml
+          pattern: '#\[spec\("([^"]+)"\)\]'
+          run: "cargo +nightly test -- -Z unstable-options --format junit"
+```
+
+`crates/core/tests/devpage_anchors.rs` applies that suite to `fixtures/shop` the way devpage does and checks it finds exactly the coverage anchors the scanner finds. devpage also needs a constraint page per requirement (`page-type: constraint`, `id: <requirement id>`); spectrace does not write those yet.
 
 ## What is an error
 

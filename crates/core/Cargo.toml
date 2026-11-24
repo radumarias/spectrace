@@ -9,3 +9,6 @@ workspace = true
 [dependencies]
 # Only for the WASM boundary (crates/core-wasm); the plain build has no dependencies.
 serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+regex = "1.13.2"
