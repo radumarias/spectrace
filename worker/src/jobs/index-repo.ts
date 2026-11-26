@@ -6,6 +6,7 @@
 import { publishSpecs } from "../devpage";
 import type { Bindings } from "../env";
 import { repoClient } from "../git";
+import { GitlabProject } from "../git/gitlab";
 import { log } from "../log";
 import type { RepoIndex } from "../specs";
 import { readTarGz } from "../tarball";
@@ -101,6 +102,11 @@ async function readRepo(job: JobRow, ctx: JobContext, repo: RepoRow): Promise<vo
   )
     .bind(repo.id, info.id, info.defaultBranch, JSON.stringify(languages), fileCount, truncated || archiveTruncated ? 1 : 0, sha)
     .run();
+  // GitLab has no app to install: spectrace adds the project's webhook itself (needs Maintainer).
+  if (client instanceof GitlabProject && env.GITLAB_WEBHOOK_SECRET?.trim() && env.PUBLIC_URL?.trim()) {
+    const hook = await client.ensureHook(`${env.PUBLIC_URL.trim().replace(/\/+$/, "")}/api/gitlab/webhook`, env.GITLAB_WEBHOOK_SECRET.trim());
+    if (hook === "failed") log("warn", "could not add the GitLab webhook", { repo: repo.full_name }, env.LOG_FORMAT);
+  }
   // devpage renders each spec; a spec it refuses keeps its last version, and the index stands.
   const devpage = await publishSpecs(env, repo.id, "spectrace");
   log(

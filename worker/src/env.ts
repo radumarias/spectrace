@@ -52,6 +52,13 @@ export interface Bindings {
   CLAUDE_CODE_ORIGIN?: string;
   /** Secret: 32 random bytes as base64 (`openssl rand -base64 32`), the AES-GCM key for users' saved API keys (src/user-keys.ts). Saving keys answers 503 until set. */
   SECRETS_KEY?: string;
+  /** A GitLab instance (self-hosted or https://gitlab.com), no trailing slash. Unset, GitLab is off. */
+  GITLAB_URL?: string;
+  /** The instance's OAuth application (secrets). Redirect URI `<PUBLIC_URL>/api/gitlab/callback`, scopes `api read_user`. Unset, people connect with a personal access token instead. */
+  GITLAB_CLIENT_ID?: string;
+  GITLAB_CLIENT_SECRET?: string;
+  /** Secret: the token GitLab sends in `X-Gitlab-Token` with each webhook. spectrace puts it on the hooks it creates. The webhook answers 500 until set. */
+  GITLAB_WEBHOOK_SECRET?: string;
   /** Overrides for tests: default `https://github.com` and `https://api.github.com`. */
   GITHUB_OAUTH_URL?: string;
   GITHUB_API_URL?: string;

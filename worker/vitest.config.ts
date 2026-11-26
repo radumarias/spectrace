@@ -23,6 +23,11 @@ export default defineConfig(async () => {
             GITHUB_APP_SLUG: "spectrace-test",
             GITHUB_APP_PRIVATE_KEY: TEST_APP_PRIVATE_KEY,
             GITHUB_WEBHOOK_SECRET: "whsec-test",
+            // GitLab is faked in test/gitlab.test.ts, never called.
+            GITLAB_URL: "http://gitlab.test",
+            GITLAB_CLIENT_ID: "glid",
+            GITLAB_CLIENT_SECRET: "glsecret",
+            GITLAB_WEBHOOK_SECRET: "glwh-test",
             // Claude is faked in test/ai.test.ts, never called.
             ANTHROPIC_BASE_URL: "http://anthropic.test",
             // AES-GCM key for saved API keys (test/user-keys.test.ts): 32 zero bytes.

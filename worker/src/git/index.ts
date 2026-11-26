@@ -1,8 +1,8 @@
 // Picks the provider for a project repository and resolves its credentials.
 import type { Bindings } from "../env";
-import { AppError } from "../error";
 import { PermanentError } from "../jobs/queue";
 import { githubForIndex, githubForSync, githubForWrite } from "./github";
+import { gitlabFor } from "./gitlab";
 import type { Provider, RepoClient } from "./types";
 
 export type { Provider, RepoClient } from "./types";
@@ -32,6 +32,5 @@ export async function repoClient(env: Bindings, projectId: string, fullName: str
     if (!owner) throw new PermanentError(`project ${projectId} is gone`);
     return githubForIndex(env, owner.owner_id, fullName);
   }
-  const msg = `${provider} repositories are not supported yet`;
-  throw purpose === "write" ? new AppError("conflict", `conflict: ${msg}`) : new PermanentError(msg);
+  return gitlabFor(env, projectId, fullName, purpose);
 }

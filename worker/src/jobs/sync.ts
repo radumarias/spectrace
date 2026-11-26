@@ -9,6 +9,7 @@
 import type { Bindings } from "../env";
 import { checkRunStatement } from "../checks";
 import { repoClient, type RepoClient } from "../git";
+import { GitlabProject, storeApprovals } from "../git/gitlab";
 import { log } from "../log";
 import { pullStatements } from "../pulls";
 import { PermanentError, registerHandler, type JobHandler } from "./queue";
@@ -53,7 +54,9 @@ async function syncRepo(env: Bindings, projectId: string, repo: RepoRow, progres
     // Files only change with the head commit; skip the extra requests when they were already read for this one.
     const files = before?.files_sha === pr.head.sha ? null : await client.pullFiles(pr.number);
     // One batch is one transaction: a PR never shows half its files.
-    await env.DB.batch(pullStatements(env, repo.id, before?.id ?? crypto.randomUUID(), pr, files));
+    const pullId = before?.id ?? crypto.randomUUID();
+    await env.DB.batch(pullStatements(env, repo.id, pullId, pr, files));
+    if (client instanceof GitlabProject) await storeApprovals(env, client, pullId, pr.number, pr.head.sha, pr.updated_at);
     await syncChecks(env, client, repo, pr.head.sha);
     await progress(pr.number);
   }
