@@ -6,7 +6,7 @@
 import { lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
-import { useCurrentProject } from "../api/queries";
+import { useCurrentProject, useGitlab } from "../api/queries";
 import { useSaveSpec, useSpec, useSpecs, type SpecAnchor, type SpecDetail, type SpecSummary } from "../api/specs";
 import { Button, Card, Pill, Tabs } from "../ui/parts";
 import { Diagram } from "../spec/Diagram";
@@ -109,7 +109,7 @@ function CodeBlock({ text, start }: { text: string; start?: number }) {
   );
 }
 
-function AnchorBlock({ spec, a }: { spec: SpecDetail; a: SpecAnchor }) {
+function AnchorBlock({ spec, a }: { spec: SpecDetail & { gitlabUrl?: string | null }; a: SpecAnchor }) {
   return (
     <div className="stack-s">
       <div className="btns" style={{ justifyContent: "space-between" }}>
@@ -124,7 +124,7 @@ function AnchorBlock({ spec, a }: { spec: SpecDetail; a: SpecAnchor }) {
   );
 }
 
-function CodeTab({ spec, step }: { spec: SpecDetail; step: Step }) {
+function CodeTab({ spec, step }: { spec: SpecDetail & { gitlabUrl?: string | null }; step: Step }) {
   return (
     <>
       {step.code.length ? (
@@ -142,7 +142,7 @@ function CodeTab({ spec, step }: { spec: SpecDetail; step: Step }) {
   );
 }
 
-function Inspector({ spec, step, onTab }: { spec: SpecDetail; step: Step; onTab: (t: string) => void }) {
+function Inspector({ spec, step, onTab }: { spec: SpecDetail & { gitlabUrl?: string | null }; step: Step; onTab: (t: string) => void }) {
   const tested = step.reqs.filter((r) => r.tested).length;
   const code = step.code[0];
   return (
@@ -214,7 +214,7 @@ function Inspector({ spec, step, onTab }: { spec: SpecDetail; step: Step; onTab:
           Open code
         </Button>
         <a className="btn sm" href={githubLine(spec, spec.path, step.line)} target="_blank" rel="noreferrer noopener" style={{ textDecoration: "none" }}>
-          Open on GitHub
+          Open on {spec.gitlabUrl ? "GitLab" : "GitHub"}
         </a>
       </div>
     </aside>
@@ -235,7 +235,10 @@ export function SpecPage() {
   const [fs, setFs] = useState(false);
   const closeFs = useCallback(() => setFs(false), []);
   const saveSpec = useSaveSpec(project?.id ?? "", specId ?? "");
-  const spec = query.data;
+  const gitlab = useGitlab();
+  const onGitlab = project?.repos.find((r) => r.full_name === query.data?.repo)?.provider === "gitlab";
+  const gitlabUrl = onGitlab ? (gitlab.data?.url ?? null) : null;
+  const spec = useMemo(() => (query.data ? { ...query.data, gitlabUrl } : undefined), [query.data, gitlabUrl]);
   const steps = useMemo(() => (spec ? stepsOf(spec) : []), [spec]);
   const status = useMemo(() => Object.fromEntries(steps.map((s) => [s.node, s.status])), [steps]);
   const tab = TABS.some((t) => t.id === params.get("tab")) ? params.get("tab")! : "diagram";

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 import { usePulls, useSyncPulls, type Pull, type PullFilter } from "../api/pulls";
-import { useCurrentProject } from "../api/queries";
+import { hostOfUrl, hostsOf, useCurrentProject } from "../api/queries";
 import { IndexBanner } from "../ui/IndexBanner";
 import { IndexFailed } from "../ui/IndexFailed";
 import { Button, Pill, type PillTone } from "../ui/parts";
@@ -13,11 +13,11 @@ const TABS: { id: PullFilter; label: string }[] = [
   { id: "merged", label: "Merged" },
 ];
 
-const EMPTY: Record<PullFilter, string> = {
-  needs: "Nothing needs you here. New PRs show up when you pull from GitHub, or on their own every few minutes.",
+const EMPTY = (hosts: string): Record<PullFilter, string> => ({
+  needs: `Nothing needs you here. New PRs show up when you pull from ${hosts}, or on their own every few minutes.`,
   open: "No pull requests in this view.",
   merged: "No pull requests in this view.",
-};
+});
 
 /** "3 min ago", "2 h ago", "5 d ago" for an ISO timestamp. */
 export function ago(iso: string, now = Date.now()): string {
@@ -47,7 +47,7 @@ function PullRow({ pull }: { pull: Pull }) {
   return (
     <Link className="card pr-row" to={`/pr/${pull.id}`}>
       <div className="stack-s" style={{ minWidth: 0 }}>
-        <span className="meta">{pull.repo} #{pull.number} · {pull.author} · {ago(pull.updatedAt)}</span>
+        <span className="meta">{pull.repo} {hostOfUrl(pull.htmlUrl) === "gitlab" ? "!" : "#"}{pull.number} · {pull.author} · {ago(pull.updatedAt)}</span>
         <b style={{ font: "600 15.5px var(--f-display)" }}>{pull.title}</b>
         <div className="btns" style={{ gap: 6 }}>
           <Pill tone={testsTone(pull)}>{pull.testsTotal === 0 ? "tests not run" : `tests ${pull.testsPassed}/${pull.testsTotal}`}</Pill>
@@ -80,7 +80,7 @@ export function PullRequests() {
   const n = project.repos.length;
   const pull = () =>
     sync.mutate(undefined, {
-      onSuccess: () => toast("Pulling from GitHub…"),
+      onSuccess: () => toast(`Pulling from ${hostsOf(project)}…`),
       onError: (e) => toast(e.message),
     });
 
@@ -93,7 +93,7 @@ export function PullRequests() {
           <p className="sub">From {n} {n === 1 ? "repo" : "repos"}. Agents review each one against the specs before you look.</p>
         </div>
         <Button variant="primary" onClick={pull} disabled={sync.isPending || indexing}>
-          {sync.isPending ? "Pulling from GitHub…" : "Pull from GitHub"}
+          {sync.isPending ? `Pulling from ${hostsOf(project)}…` : `Pull from ${hostsOf(project)}`}
         </Button>
       </div>
       {indexing && <IndexBanner project={project} />}
@@ -123,7 +123,7 @@ export function PullRequests() {
           {list.isPending ? null : pulls.length ? (
             pulls.map((p) => <PullRow key={p.id} pull={p} />)
           ) : (
-            <div className="card pad sub">{EMPTY[filter]}</div>
+            <div className="card pad sub">{EMPTY(hostsOf(project))[filter]}</div>
           )}
         </div>
       )}

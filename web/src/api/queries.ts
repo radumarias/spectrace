@@ -8,6 +8,10 @@ export type Project = components["schemas"]["Project"];
 
 /** A repository GitHub lets the user pick (`GET /api/github/repos`, from the GitHub App installation). */
 export type GithubRepo = components["schemas"]["GithubRepo"];
+/** A GitLab project the user can push to (`GET /api/gitlab/repos`, from their connected account). */
+export type GitlabRepo = components["schemas"]["GitlabRepo"];
+export type GitlabStatus = components["schemas"]["GitlabStatus"];
+export type Provider = Project["repos"][number]["provider"];
 
 export function makeQueryClient() {
   return new QueryClient({
@@ -15,7 +19,7 @@ export function makeQueryClient() {
   });
 }
 
-export const keys = { me: ["me"] as const, projects: ["projects"] as const, githubRepos: ["github-repos"] as const };
+export const keys = { me: ["me"] as const, projects: ["projects"] as const, githubRepos: ["github-repos"] as const, gitlab: ["gitlab"] as const, gitlabRepos: ["gitlab-repos"] as const };
 
 /** The signed-in user, or `null` when there is no session (401). */
 export function useMe() {
@@ -148,3 +152,75 @@ export function useGithubRepos() {
     },
   });
 }
+
+/** Whether this server has GitLab, and the signed-in user's account there. */
+export function useGitlab() {
+  return useQuery({
+    queryKey: keys.gitlab,
+    queryFn: async (): Promise<GitlabStatus> => {
+      const { data } = await api.GET("/api/gitlab");
+      return data ?? { configured: false, url: null, oauth: false, account: null };
+    },
+  });
+}
+
+export function useGitlabRepos(enabled: boolean) {
+  return useQuery({
+    queryKey: keys.gitlabRepos,
+    enabled,
+    queryFn: async (): Promise<GitlabRepo[]> => {
+      try {
+        const { data } = await api.GET("/api/gitlab/repos");
+        return data ?? [];
+      } catch {
+        return [];
+      }
+    },
+  });
+}
+
+export function useConnectGitlabToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (token: string): Promise<GitlabStatus> => {
+      const { data, error } = await api.POST("/api/gitlab/token", { body: { token } });
+      if (!data) throw apiError(error, "Could not connect GitLab.");
+      return data;
+    },
+    onSuccess: (status) => {
+      qc.setQueryData(keys.gitlab, status);
+      void qc.invalidateQueries({ queryKey: keys.gitlabRepos });
+    },
+  });
+}
+
+export function useDisconnectGitlab() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      await api.DELETE("/api/gitlab");
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.gitlab });
+      qc.setQueryData(keys.gitlabRepos, []);
+    },
+  });
+}
+
+/** Where a repo's pages live: `https://github.com/owner/name`, or the GitLab instance's. */
+export function repoWebUrl(provider: Provider, fullName: string, gitlabUrl: string | null): string {
+  return provider === "gitlab" && gitlabUrl ? `${gitlabUrl}/${fullName}` : `https://github.com/${fullName}`;
+}
+
+export const PROVIDER_NAME: Record<Provider, string> = { github: "GitHub", gitlab: "GitLab" };
+
+/** "GitHub", "GitLab", or "GitHub and GitLab": the hosts a project's repos are on. */
+export function hostsOf(project: Pick<Project, "repos">): string {
+  // Repos stored before providers existed read as GitHub.
+  const set = new Set(project.repos.map((r) => r.provider ?? "github"));
+  if (set.size === 0) return "GitHub";
+  return [...(["github", "gitlab"] as const)].filter((p) => set.has(p)).map((p) => PROVIDER_NAME[p]).join(" and ");
+}
+
+/** The host of a pull request page, from its link. */
+export const hostOfUrl = (url: string): Provider => (/^https?:\/\/(www\.)?github\.com\//i.test(url) ? "github" : "gitlab");

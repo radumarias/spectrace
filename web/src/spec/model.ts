@@ -76,9 +76,12 @@ export function itemName(excerpt: string): string | null {
 }
 
 /** A file and line on GitHub, at the indexed branch. */
-export function githubLine(spec: Pick<SpecDetail, "repo" | "defaultBranch">, path: string, line?: number): string {
+export function githubLine(spec: Pick<SpecDetail, "repo" | "defaultBranch"> & { gitlabUrl?: string | null }, path: string, line?: number): string {
   const p = path.split("/").map(encodeURIComponent).join("/");
-  return `https://github.com/${spec.repo}/blob/${encodeURIComponent(spec.defaultBranch)}/${p}${line ? `#L${line}` : ""}`;
+  const branch = encodeURIComponent(spec.defaultBranch);
+  // A repo on GitLab carries the instance's URL; its file pages live under `/-/blob/`.
+  if (spec.gitlabUrl) return `${spec.gitlabUrl}/${spec.repo}/-/blob/${branch}/${p}${line ? `#L${line}` : ""}`;
+  return `https://github.com/${spec.repo}/blob/${branch}/${p}${line ? `#L${line}` : ""}`;
 }
 
 /** `{repo} / {area} / {path}`, the line above the title. */

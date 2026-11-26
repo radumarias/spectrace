@@ -46,7 +46,7 @@ const callbackRoute = createRoute({
   path: "/api/gitlab/callback",
   summary: "GitLab redirects back here; stores the account",
   request: { query: z.object({ code: z.string().optional(), state: z.string().optional(), error: z.string().optional() }) },
-  responses: { 303: { description: "Connected, redirect to /?gitlab=connected" }, 400: err("Bad request"), 401: err("Not signed in"), 502: err("GitLab failed") },
+  responses: { 303: { description: "Connected, redirect to /project?gitlab=connected" }, 400: err("Bad request"), 401: err("Not signed in"), 502: err("GitLab failed") },
 });
 
 const tokenRoute = createRoute({
@@ -127,7 +127,7 @@ export function registerGitlab(app: OpenAPIHono<AppEnv>) {
     const who = await gitlabWhoAmI(cfg, t.access_token);
     if (!who) throw new AppError("upstream", "GitLab did not accept its own token");
     await saveOauthTokens(c.env, user.id, who, t);
-    return c.redirect("/?gitlab=connected", 303);
+    return c.redirect("/project?gitlab=connected", 303);
   });
 
   app.openapi(tokenRoute, async (c) => {

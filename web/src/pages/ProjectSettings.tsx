@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { clearCurrentProjectId } from "../api/current";
-import { useCurrentProject, useDeleteProject, useGithubRepos, useReindexProject, useUpdateProject, type Project, type ProjectChange } from "../api/queries";
+import { hostsOf, useCurrentProject, useDeleteProject, useGithubRepos, useGitlab, useGitlabRepos, useReindexProject, useUpdateProject, type Project, type ProjectChange } from "../api/queries";
 import { Button, PageHead } from "../ui/parts";
 import { RepoField, type RepoPick } from "../ui/RepoField";
+import { GitlabConnect } from "../ui/GitlabConnect";
 import { IndexBanner } from "../ui/IndexBanner";
 import { useToast } from "../ui/Toast";
 
@@ -14,6 +15,7 @@ const SAVE_DELAY = 600;
 const asPicks = (p: Project): RepoPick[] =>
   p.repos.map((r) => ({
     full_name: r.full_name,
+    provider: r.provider,
     default_branch: r.default_branch,
     ...(r.github_repo_id === null ? {} : { github_repo_id: r.github_repo_id }),
   }));
@@ -25,6 +27,8 @@ function Settings({ project }: { project: Project }) {
   const remove = useDeleteProject(project.id);
   const reindex = useReindexProject(project.id);
   const github = useGithubRepos();
+  const gitlab = useGitlab();
+  const gitlabRepos = useGitlabRepos(Boolean(gitlab.data?.account));
   const [name, setName] = useState(project.name);
   const [context, setContext] = useState(project.context);
   const [repos, setRepos] = useState<RepoPick[]>(() => asPicks(project));
@@ -110,7 +114,7 @@ function Settings({ project }: { project: Project }) {
           />
           {nameBad && <span className="err" role="alert">Give the project a name.</span>}
         </div>
-        <RepoField value={repos} onChange={onRepos} suggestions={github.data ?? []} />
+        <RepoField value={repos} onChange={onRepos} suggestions={github.data ?? []} gitlab={gitlabRepos.data ?? []} gitlabUrl={gitlab.data?.url ?? null} />
         <div className="fld">
           <label htmlFor="ps-ctx">Context</label>
           <textarea
@@ -133,10 +137,11 @@ function Settings({ project }: { project: Project }) {
           </span>
         </div>
       </div>
+      <GitlabConnect />
       <div className="card pad btns" style={{ justifyContent: "space-between" }}>
         <div className="stack-s" style={{ gap: 2 }}>
           <b>Remove this project</b>
-          <span className="sub" style={{ fontSize: 12.5 }}>Only removes it from spectrace. Repos and PRs on GitHub stay as they are.</span>
+          <span className="sub" style={{ fontSize: 12.5 }}>Only removes it from spectrace. Repos and PRs on {hostsOf(project)} stay as they are.</span>
         </div>
         {confirm ? (
           <div className="btns">
