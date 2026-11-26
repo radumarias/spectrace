@@ -2879,7 +2879,7 @@
         ],
         "responses": {
           "303": {
-            "description": "Connected, redirect to /?gitlab=connected"
+            "description": "Connected, redirect to /project?gitlab=connected"
           },
           "400": {
             "description": "Bad request",

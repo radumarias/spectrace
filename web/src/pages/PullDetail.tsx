@@ -1,6 +1,6 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import { useCurrentProject } from "../api/queries";
+import { hostOfUrl, PROVIDER_NAME, useCurrentProject } from "../api/queries";
 import { isCurrentReview, isRunning, useAgentReview, useMergePull, usePull, usePullDiff, usePullReviews, useReviewPull, useRunAgentReview, type AgentReview, type Finding, type PullDetail as Pull, type WalkStep } from "../api/pulls";
 import { Button, Card, Pill, Tabs, type PillTone } from "../ui/parts";
 import { Diff, type Range } from "../ui/Diff";
@@ -85,7 +85,7 @@ export function PullDetail() {
         <div>
           <BackLink />
           <span className="mono sub" style={{ fontSize: 12 }}>
-            {p.repo} #{p.number} · {p.headRef} → {p.baseRef} · by {p.author}
+            {p.repo} {hostOfUrl(p.htmlUrl) === "gitlab" ? "!" : "#"}{p.number} · {p.headRef} → {p.baseRef} · by {p.author}
           </span>
           <h1>{p.title}</h1>
           <div className="btns" style={{ gap: 6 }}>
@@ -480,7 +480,7 @@ function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }:
         <Card className="stack">
           <span className="lbl">Checks</span>
           {p.checks.length === 0 ? (
-            <p className="sub" style={{ fontSize: 13 }}>No check runs for this commit yet. Pull from GitHub on the pull requests page to read them.</p>
+            <p className="sub" style={{ fontSize: 13 }}>{`No check runs for this commit yet. Pull from ${PROVIDER_NAME[hostOfUrl(p.htmlUrl)]} on the pull requests page to read them.`}</p>
           ) : (
             <ul className="checks">
               {p.checks.map((c) => {
@@ -501,7 +501,7 @@ function Walkthrough({ projectId, pull: p, review, gates, context, onFindings }:
             <span style={{ color: "var(--ok)" }}>+{p.additions}</span> <span style={{ color: "var(--bad)" }}>−{p.deletions}</span> in {p.changedFiles}{" "}
             {p.changedFiles === 1 ? "file" : "files"}
           </span>
-          <a href={p.htmlUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>Open on GitHub</a>
+          <a href={p.htmlUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5 }}>Open on {PROVIDER_NAME[hostOfUrl(p.htmlUrl)]}</a>
         </Card>
       </div>
     </div>
@@ -546,7 +546,7 @@ function FileRow({ file: f, patch, pending, htmlUrl, defaultOpen = false, ranges
           ) : (
             <p className="sub pad">
               No diff to show here: the file is binary, empty, or too large.{" "}
-              <a href={`${htmlUrl}/files`} target="_blank" rel="noreferrer">View it on GitHub</a>
+              <a href={`${htmlUrl}/${hostOfUrl(htmlUrl) === "gitlab" ? "diffs" : "files"}`} target="_blank" rel="noreferrer">View it on {PROVIDER_NAME[hostOfUrl(htmlUrl)]}</a>
             </p>
           )}
         </div>
@@ -622,7 +622,7 @@ function Actions({ projectId, pull: p, gates }: { projectId: string; pull: Pull;
           : p.state === "closed"
             ? "Closed without merging"
             : p.draft
-              ? "Draft: mark it ready on GitHub to merge"
+              ? `Draft: mark it ready on ${PROVIDER_NAME[hostOfUrl(p.htmlUrl)]} to merge`
               : current === "changes_requested"
                 ? "You asked for changes on this commit"
                 : current === "approved"

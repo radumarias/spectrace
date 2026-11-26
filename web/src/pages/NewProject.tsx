@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { setCurrentProjectId } from "../api/current";
-import { useCreateProject, useGithubRepos } from "../api/queries";
+import { useCreateProject, useGithubRepos, useGitlab, useGitlabRepos } from "../api/queries";
 import { Button } from "../ui/parts";
 import { RepoField, type RepoPick } from "../ui/RepoField";
 import { useToast } from "../ui/Toast";
@@ -14,6 +14,8 @@ export function NewProject() {
   const toast = useToast();
   const create = useCreateProject();
   const github = useGithubRepos();
+  const gitlab = useGitlab();
+  const gitlabRepos = useGitlabRepos(Boolean(gitlab.data?.account));
   const [name, setName] = useState("");
   const [repos, setRepos] = useState<RepoPick[]>([]);
   const [context, setContext] = useState("");
@@ -57,7 +59,7 @@ export function NewProject() {
             maxLength={40}
           />
         </div>
-        <RepoField value={repos} onChange={setRepos} suggestions={github.data ?? []} />
+        <RepoField value={repos} onChange={setRepos} suggestions={github.data ?? []} gitlab={gitlabRepos.data ?? []} gitlabUrl={gitlab.data?.url ?? null} />
         <div className="fld">
           <label htmlFor="np-ctx">Context</label>
           <textarea id="np-ctx" rows={5} value={context} onChange={(e) => setContext(e.target.value)} placeholder={CTX_HINT} />

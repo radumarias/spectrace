@@ -219,7 +219,7 @@ describe("GitLab account", () => {
     expect((await call(`/api/gitlab/callback?code=good&state=nope`, stateCookie)).status).toBe(400);
     const back = await call(`/api/gitlab/callback?code=good&state=${state}`, stateCookie);
     expect(back.status).toBe(303);
-    expect(back.headers.get("location")).toBe("/?gitlab=connected");
+    expect(back.headers.get("location")).toBe("/project?gitlab=connected");
     expect(((await (await call("/api/gitlab", cookie)).json()) as { account: unknown }).account).toEqual({ username: "radu", kind: "oauth" });
     // Expire it: the next use refreshes first.
     await env.DB.prepare("UPDATE gitlab_connections SET expires_at = '2000-01-01T00:00:00Z' WHERE user_id = ?1").bind(userId).run();

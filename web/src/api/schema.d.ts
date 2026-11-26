@@ -837,7 +837,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Connected, redirect to /?gitlab=connected */
+                /** @description Connected, redirect to /project?gitlab=connected */
                 303: {
                     headers: {
                         [name: string]: unknown;
