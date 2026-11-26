@@ -235,8 +235,9 @@ export function SpecPage() {
   const [fs, setFs] = useState(false);
   const closeFs = useCallback(() => setFs(false), []);
   const saveSpec = useSaveSpec(project?.id ?? "", specId ?? "");
-  const gitlab = useGitlab();
   const onGitlab = project?.repos.find((r) => r.full_name === query.data?.repo)?.provider === "gitlab";
+  // Only GitLab repos need the instance's URL; GitHub-only projects never ask.
+  const gitlab = useGitlab(onGitlab);
   const gitlabUrl = onGitlab ? (gitlab.data?.url ?? null) : null;
   const spec = useMemo(() => (query.data ? { ...query.data, gitlabUrl } : undefined), [query.data, gitlabUrl]);
   const steps = useMemo(() => (spec ? stepsOf(spec) : []), [spec]);

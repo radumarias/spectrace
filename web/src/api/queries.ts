@@ -154,9 +154,10 @@ export function useGithubRepos() {
 }
 
 /** Whether this server has GitLab, and the signed-in user's account there. */
-export function useGitlab() {
+export function useGitlab(enabled = true) {
   return useQuery({
     queryKey: keys.gitlab,
+    enabled,
     queryFn: async (): Promise<GitlabStatus> => {
       const { data } = await api.GET("/api/gitlab");
       return data ?? { configured: false, url: null, oauth: false, account: null };
