@@ -231,7 +231,7 @@ export function registerWebhook(app: OpenAPIHono<AppEnv>) {
 
     const fullName = payload.repository?.full_name;
     const { results: repos } = fullName
-      ? await c.env.DB.prepare("SELECT id, project_id, full_name, default_branch FROM project_repos WHERE full_name = ?1").bind(fullName).all<RepoRow>()
+      ? await c.env.DB.prepare("SELECT id, project_id, full_name, default_branch FROM project_repos WHERE full_name = ?1 AND provider = 'github'").bind(fullName).all<RepoRow>()
       : { results: [] as RepoRow[] };
 
     let handled = false;

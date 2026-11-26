@@ -1,16 +1,15 @@
 // Index job (T1.6, specs and anchors since T4.4): read a repository through the
-// GitHub API, with no clone, and record what is there: repo details, and the
+// host's API (GitHub or GitLab), with no clone, and record what is there: repo details, and the
 // specs, requirements and anchors parsed from one archive of the default branch.
 // One job per repo; `target` is the `project_repos.id`. Re-running it is safe:
 // it only overwrites the same rows.
 import { publishSpecs } from "../devpage";
 import type { Bindings } from "../env";
-import { AppError } from "../error";
-import { appConfigFromEnv, appJwt, ghHeaders, installationToken, linkRepoInstallation, type AppConfig } from "../github-app";
+import { repoClient } from "../git";
 import { log } from "../log";
 import type { RepoIndex } from "../specs";
 import { readTarGz } from "../tarball";
-import { enqueueJob, errorMessage, isFinalFailure, PermanentError, type JobContext, type JobRow } from "./queue";
+import { enqueueJob, errorMessage, isFinalFailure, type JobContext, type JobRow } from "./queue";
 import { SYNC_KIND } from "./sync";
 
 export const INDEX_KIND = "index";
@@ -46,7 +45,6 @@ interface RepoRow {
   id: string;
   project_id: string;
   full_name: string;
-  owner_id: string;
 }
 
 const STEPS = 5;
@@ -62,101 +60,46 @@ async function markFailed(env: Bindings, repoId: string, message: string) {
   await env.DB.prepare("UPDATE project_repos SET index_state = 'failed', index_error = ?2 WHERE id = ?1").bind(repoId, message.slice(0, 500)).run();
 }
 
-async function ghGet(app: AppConfig, token: string, path: string): Promise<Response> {
-  try {
-    return await fetch(`${app.apiUrl}${path}`, { headers: ghHeaders(token) });
-  } catch (cause) {
-    throw new Error(`GitHub ${path}: ${String(cause)}`, { cause });
-  }
-}
-
-/** 4xx other than rate limits cannot be fixed by trying again; 5xx and rate limits can. */
-function failure(what: string, res: Response): Error {
-  const rateLimited = res.status === 429 || (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0");
-  const msg = `GitHub ${what}: status ${res.status}`;
-  return res.status >= 400 && res.status < 500 && !rateLimited ? new PermanentError(msg) : new Error(msg);
-}
-
-/** The installation of the GitHub App that covers this repo, and only if the project's owner may use it. */
-async function installationFor(env: Bindings, app: AppConfig, repo: RepoRow): Promise<number> {
-  const notInstalled = new PermanentError(`the spectrace GitHub App is not installed on ${repo.full_name}`);
-  let res: Response;
-  try {
-    res = await fetch(`${app.apiUrl}/repos/${repo.full_name}/installation`, { headers: ghHeaders(await appJwt(app)) });
-  } catch (cause) {
-    if (cause instanceof AppError) throw new PermanentError(cause.message);
-    throw new Error(`GitHub installation lookup: ${String(cause)}`, { cause });
-  }
-  if (res.status === 404) throw notInstalled;
-  if (!res.ok) throw failure("installation lookup", res);
-  const { id } = (await res.json()) as { id: number };
-  const allowed = await env.DB.prepare("SELECT 1 AS ok FROM user_installations WHERE user_id = ?1 AND installation_id = ?2").bind(repo.owner_id, id).first();
-  if (allowed) return id;
-  // Installed on GitHub but never linked to this person (for example, installed outside spectrace's install page).
-  if ((await linkRepoInstallation(app, env.DB, repo.owner_id, repo.full_name)) === id) return id;
-  throw notInstalled;
-}
-
 async function readRepo(job: JobRow, ctx: JobContext, repo: RepoRow): Promise<void> {
   const { env } = ctx;
-  let app: AppConfig;
-  try {
-    app = appConfigFromEnv(env);
-  } catch (error) {
-    throw new PermanentError(error instanceof Error ? error.message : String(error));
-  }
-  const installationId = await installationFor(env, app, repo);
-  const token = await installationToken(app, installationId);
-  if (!token) throw new PermanentError(`the spectrace GitHub App is no longer installed (${repo.full_name})`);
+  const client = await repoClient(env, repo.project_id, repo.full_name, "index");
   const base = { repoId: repo.id, repo: repo.full_name, steps: STEPS };
 
   await ctx.progress({ ...base, step: 1, stage: "Reading repo details" });
-  const meta = await ghGet(app, token, `/repos/${repo.full_name}`);
-  if (!meta.ok) throw failure("repository", meta);
-  const info = (await meta.json()) as { id: number; default_branch: string };
+  const info = await client.repository();
 
   await ctx.progress({ ...base, step: 2, stage: "Reading code, docs and tests" });
-  const treeRes = await ghGet(app, token, `/repos/${repo.full_name}/git/trees/${encodeURIComponent(info.default_branch)}?recursive=1`);
-  let fileCount = 0;
-  let truncated = false;
-  let sha: string | null = null;
-  // 409 is GitHub's answer for a repository with no commits yet.
-  if (treeRes.status !== 409) {
-    if (!treeRes.ok) throw failure("git tree", treeRes);
-    const tree = (await treeRes.json()) as { sha: string; truncated?: boolean; tree: { type: string }[] };
-    fileCount = tree.tree.filter((e) => e.type === "blob").length;
-    truncated = tree.truncated === true;
-    sha = tree.sha;
-  }
+  const tree = await client.tree(info.defaultBranch);
+  const fileCount = tree?.fileCount ?? 0;
+  const truncated = tree?.truncated ?? false;
+  const sha = tree?.sha ?? null;
 
   let index: RepoIndex = { specs: [], anchors: [] };
   let archiveTruncated = false;
   if (sha) {
     await ctx.progress({ ...base, step: 3, stage: "Reading specs, code and tests" });
-    const tar = await ghGet(app, token, `/repos/${repo.full_name}/tarball/${encodeURIComponent(info.default_branch)}`);
-    if (!tar.ok || !tar.body) throw failure("tarball", tar);
+    const tar = await client.archive(info.defaultBranch);
     // Loaded here, not at the top: the WASM core is only needed by the job, and
     // the routes (and `npm run openapi`, which runs them in Node) stay free of it.
     const { buildIndex, wantedPath } = await import("../specs");
-    const read = await readTarGz(tar.body, wantedPath, TAR_LIMITS);
+    const read = await readTarGz(tar, wantedPath, TAR_LIMITS);
     archiveTruncated = read.truncated;
     await ctx.progress({ ...base, step: 4, stage: "Parsing specs and anchors" });
     index = buildIndex(read.files);
   }
 
   await ctx.progress({ ...base, step: 5, stage: "Reading languages" });
-  const langRes = await ghGet(app, token, `/repos/${repo.full_name}/languages`);
-  if (!langRes.ok) throw failure("languages", langRes);
-  const languages = (await langRes.json()) as Record<string, number>;
+  const languages = await client.languages();
 
   await storeIndex(env, repo, sha, index);
+  // `github_repo_id` is GitHub's id; other hosts' repos are addressed by path.
   await env.DB.prepare(
-    `UPDATE project_repos SET github_repo_id = ?2, default_branch = ?3, languages = ?4, file_count = ?5,
+    `UPDATE project_repos SET github_repo_id = CASE provider WHEN 'github' THEN ?2 ELSE github_repo_id END, default_branch = ?3, languages = ?4, file_count = ?5,
        tree_truncated = ?6, head_sha = ?7, index_state = 'ready', index_error = NULL,
        indexed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
      WHERE id = ?1`,
   )
-    .bind(repo.id, info.id, info.default_branch, JSON.stringify(languages), fileCount, truncated || archiveTruncated ? 1 : 0, sha)
+    .bind(repo.id, info.id, info.defaultBranch, JSON.stringify(languages), fileCount, truncated || archiveTruncated ? 1 : 0, sha)
     .run();
   // devpage renders each spec; a spec it refuses keeps its last version, and the index stands.
   const devpage = await publishSpecs(env, repo.id, "spectrace");
@@ -210,7 +153,7 @@ async function storeIndex(env: Bindings, repo: RepoRow, sha: string | null, inde
 /** The job handler for kind "index". */
 export async function indexRepo(job: JobRow, ctx: JobContext): Promise<void> {
   const repo = await ctx.env.DB.prepare(
-    `SELECT r.id, r.project_id, r.full_name, p.owner_id FROM project_repos r JOIN projects p ON p.id = r.project_id
+    `SELECT r.id, r.project_id, r.full_name FROM project_repos r
      WHERE r.id = ?1 AND r.project_id = ?2`,
   )
     .bind(job.target, job.project_id)

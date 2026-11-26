@@ -4,13 +4,13 @@ import type { Context } from "hono";
 import type { AppEnv, Bindings } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
-import { appConfigFromEnv, ghHeaders, installationToken } from "../github-app";
 import { checkRunsOf, checksState } from "../checks";
+import { repoClient } from "../git";
 import { pullGates } from "../gates";
 import { enqueueJob, type JobRow } from "../jobs/queue";
-import { ghPages, installationFor, MAX_FILE_PAGES, SYNC_KIND } from "../jobs/sync";
+import { SYNC_KIND } from "../jobs/sync";
 import { log } from "../log";
-import { MAX_PATCH_CHARS, type GhFile } from "../pulls";
+import { MAX_PATCH_CHARS } from "../pulls";
 import { Job, toJob } from "./jobs";
 import { requireProjectOwner } from "./projects";
 
@@ -315,43 +315,18 @@ async function writablePull(c: Context<AppEnv>, projectId: string, pullId: strin
   return { user, pr: row };
 }
 
-/** A call to GitHub as the App installed on the repo's owner. Returns the status and body; 5xx and network errors throw. */
-export async function github(env: Bindings, projectId: string, fullName: string, method: string, path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> }> {
-  const installationId = await installationFor(env, projectId, fullName);
-  if (installationId === null) throw new AppError("conflict", `conflict: no GitHub App installation for ${fullName}; install the app on its owner first`);
-  const app = appConfigFromEnv(env);
-  const token = await installationToken(app, installationId);
-  if (token === null) throw new AppError("conflict", `conflict: GitHub no longer knows the installation for ${fullName}`);
-  let res: Response;
+/** Each file's diff as the host has it now, or null when it cannot be asked (no access, an error); never throws. */
+async function patchesFromHost(env: Bindings, projectId: string, fullName: string, number: number): Promise<Map<string, string> | null> {
   try {
-    res = await fetch(`${app.apiUrl}${path}`, { method, headers: { ...ghHeaders(token), "content-type": "application/json" }, body: JSON.stringify(body) });
-  } catch (cause) {
-    throw new AppError("upstream", `GitHub ${method} ${path}: ${String(cause)}`, { cause });
-  }
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (res.status >= 500 || res.status === 401 || res.status === 403 || res.status === 429) {
-    throw new AppError("upstream", `GitHub ${method} ${path}: status ${res.status} ${String(json.message ?? "")}`);
-  }
-  return { status: res.status, json };
-}
-
-/** Each file's diff as GitHub has it now, or null when GitHub cannot be asked (no installation, an error); never throws. */
-async function patchesFromGithub(env: Bindings, projectId: string, fullName: string, number: number): Promise<Map<string, string> | null> {
-  try {
-    const installationId = await installationFor(env, projectId, fullName);
-    if (installationId === null) return null;
-    const app = appConfigFromEnv(env);
-    const token = await installationToken(app, installationId);
-    if (token === null) return null;
-    const files = await ghPages<GhFile>(app, token, `files of ${fullName}#${number}`, `/repos/${fullName}/pulls/${number}/files`, MAX_FILE_PAGES);
+    const client = await repoClient(env, projectId, fullName, "write");
+    const files = await client.pullFiles(number);
     return new Map(files.flatMap((f) => (f.patch ? [[f.filename, f.patch] as const] : [])));
   } catch (cause) {
-    log("warn", "diff: could not read the files from GitHub", { fullName, number, error: String(cause) });
+    log("warn", "diff: could not read the files from the host", { fullName, number, error: String(cause) });
     return null;
   }
 }
 
-const message = (json: Record<string, unknown>) => (typeof json.message === "string" ? json.message : "GitHub refused");
 
 interface ReviewRow {
   id: number;
@@ -383,17 +358,14 @@ export function registerPullActions(app: OpenAPIHono<AppEnv>) {
     const text = (body ?? "").trim();
     if (verdict === "request_changes" && text === "") throw AppError.badRequest("requesting changes needs a comment");
     const { user, pr } = await writablePull(c, projectId, pullId);
-    const res = await github(c.env, projectId, pr.full_name, "POST", `/repos/${pr.full_name}/pulls/${pr.number}/reviews`, {
-      commit_id: pr.head_sha,
-      event: verdict === "approve" ? "APPROVE" : "REQUEST_CHANGES",
-      ...(text ? { body: text } : {}),
-    });
-    if (res.status !== 200 && res.status !== 201) throw new AppError("conflict", `conflict: ${message(res.json)}`);
+    const client = await repoClient(c.env, projectId, pr.full_name, "write");
+    const res = await client.review(pr.number, pr.head_sha, verdict, text);
+    if (!res.ok) throw new AppError("conflict", `conflict: ${res.message}`);
     const row = await c.env.DB.prepare(
       `INSERT INTO pull_reviews (pull_request_id, user_id, verdict, body, head_sha, github_review_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
        RETURNING id, verdict, body, head_sha, github_review_id, created_at`,
     )
-      .bind(pullId, user.id, verdict === "approve" ? "approved" : "changes_requested", text, pr.head_sha, typeof res.json.id === "number" ? res.json.id : null)
+      .bind(pullId, user.id, verdict === "approve" ? "approved" : "changes_requested", text, pr.head_sha, res.id)
       .first<ReviewRow>();
     if (!row) throw new AppError("internal", "pull_reviews insert returned no row");
     return c.json(toReview(row), 201);
@@ -406,9 +378,9 @@ export function registerPullActions(app: OpenAPIHono<AppEnv>) {
     if (pr.draft === 1) throw new AppError("conflict", "conflict: a draft pull request cannot be merged");
     const open = (await pullGates(c.env, pr)).find((g) => g.status === "open");
     if (open) throw new AppError("conflict", `conflict: gate open: ${open.label}`);
-    const res = await github(c.env, projectId, pr.full_name, "PUT", `/repos/${pr.full_name}/pulls/${pr.number}/merge`, { merge_method: method, sha: pr.head_sha });
-    // 404: gone; 405: not mergeable (checks, conflicts, protection); 409: head moved; 422: method not allowed.
-    if (res.status !== 200) throw new AppError(res.status === 404 ? "not_found" : "conflict", `${res.status === 404 ? "not found" : "conflict"}: ${message(res.json)}`);
+    const client = await repoClient(c.env, projectId, pr.full_name, "write");
+    const res = await client.merge(pr.number, pr.head_sha, method);
+    if (!res.ok) throw new AppError(res.notFound ? "not_found" : "conflict", `${res.notFound ? "not found" : "conflict"}: ${res.message}`);
     // The `pull_request` webhook will say the same; storing it now keeps the answer and the inbox right at once.
     await c.env.DB.prepare(
       `UPDATE pull_requests SET state = 'closed', merged_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), github_updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
@@ -475,7 +447,7 @@ export function registerPulls(app: OpenAPIHono<AppEnv>) {
       .all<{ path: string; patch: string | null; additions: number; deletions: number }>();
     // Files read before diffs were stored (or by a sync that skipped them) have none: ask GitHub once and keep what it returns.
     if (results.some((f) => f.patch === null && f.additions + f.deletions > 0)) {
-      const fetched = await patchesFromGithub(c.env, projectId, found.full_name, found.number);
+      const fetched = await patchesFromHost(c.env, projectId, found.full_name, found.number);
       if (fetched) {
         const updates: D1PreparedStatement[] = [];
         for (const f of results) {
