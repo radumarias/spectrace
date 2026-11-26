@@ -145,6 +145,117 @@
           "handled"
         ]
       },
+      "GitlabStatus": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "This server has a GitLab instance (GITLAB_URL)"
+          },
+          "url": {
+            "type": "string",
+            "nullable": true,
+            "example": "https://gitlab.example.com"
+          },
+          "oauth": {
+            "type": "boolean",
+            "description": "Connecting through the instance's OAuth application is possible; otherwise only with a token"
+          },
+          "account": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "username": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "oauth",
+                  "token"
+                ]
+              }
+            },
+            "required": [
+              "username",
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "configured",
+          "url",
+          "oauth",
+          "account"
+        ]
+      },
+      "GitlabToken": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "A personal access token with the api scope"
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "GitlabRepo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "full_name": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "default_branch": {
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "html_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "full_name",
+          "name",
+          "default_branch",
+          "private",
+          "html_url"
+        ]
+      },
+      "GitlabWebhookResult": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "event": {
+            "type": "string"
+          },
+          "handled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "event",
+          "handled"
+        ]
+      },
       "Project": {
         "type": "object",
         "properties": {
@@ -184,6 +295,13 @@
         "properties": {
           "id": {
             "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "github",
+              "gitlab"
+            ]
           },
           "github_repo_id": {
             "type": "integer",
@@ -228,6 +346,7 @@
         },
         "required": [
           "id",
+          "provider",
           "github_repo_id",
           "full_name",
           "default_branch",
@@ -2654,6 +2773,292 @@
         }
       }
     },
+    "/api/gitlab": {
+      "get": {
+        "summary": "Whether GitLab is on, and the signed-in user's GitLab account",
+        "responses": {
+          "200": {
+            "description": "Status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitlabStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Forget the signed-in user's GitLab account",
+        "responses": {
+          "204": {
+            "description": "Forgotten (also when there was none)"
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gitlab/connect": {
+      "get": {
+        "summary": "Start connecting a GitLab account (redirects to GitLab)",
+        "responses": {
+          "303": {
+            "description": "Redirect to GitLab"
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitLab or its OAuth application is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gitlab/callback": {
+      "get": {
+        "summary": "GitLab redirects back here; stores the account",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "code",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "state",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "error",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Connected, redirect to /?gitlab=connected"
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitLab failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gitlab/token": {
+      "post": {
+        "summary": "Connect a GitLab account with a personal access token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GitlabToken"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitlabStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "GitLab did not accept the token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "GitLab is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gitlab/repos": {
+      "get": {
+        "summary": "GitLab repositories the signed-in user can push to",
+        "responses": {
+          "200": {
+            "description": "Repositories, sorted by path; empty when no account is connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GitlabRepo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "GitLab failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/gitlab/webhook": {
+      "post": {
+        "summary": "GitLab webhook receiver",
+        "description": "Called by GitLab, not by the web app. Needs `X-Gitlab-Token` and `X-Gitlab-Event`. Handles merge request, push, pipeline and job events; other events are acknowledged and ignored.",
+        "responses": {
+          "200": {
+            "description": "Accepted (`handled` is false for events we do not use)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitlabWebhookResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a JSON payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Token missing or wrong",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Webhook secret not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects": {
       "get": {
         "summary": "My projects",
@@ -2703,6 +3108,14 @@
                     "items": {
                       "type": "object",
                       "properties": {
+                        "provider": {
+                          "type": "string",
+                          "enum": [
+                            "github",
+                            "gitlab"
+                          ],
+                          "description": "Default github"
+                        },
                         "github_repo_id": {
                           "type": "integer",
                           "nullable": true
@@ -2837,6 +3250,14 @@
                     "items": {
                       "type": "object",
                       "properties": {
+                        "provider": {
+                          "type": "string",
+                          "enum": [
+                            "github",
+                            "gitlab"
+                          ],
+                          "description": "Default github"
+                        },
                         "github_repo_id": {
                           "type": "integer",
                           "nullable": true
@@ -3010,8 +3431,16 @@
                 "properties": {
                   "repo": {
                     "type": "string",
-                    "description": "owner/repo, or a link to the repository on GitHub",
+                    "description": "owner/repo, or a link to the repository on GitHub or on this server's GitLab",
                     "example": "acme/shop"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab"
+                    ],
+                    "description": "Where the repo lives; read from a link when left out, else github"
                   }
                 },
                 "required": [

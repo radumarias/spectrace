@@ -11,6 +11,8 @@ import { registerClaude } from "./routes/claude";
 import { registerCoordinator } from "./routes/coordinator";
 import { registerRequirements } from "./routes/requirements";
 import { registerGithub } from "./routes/github";
+import { registerGitlab } from "./routes/gitlab";
+import { registerGitlabWebhook } from "./routes/gitlab-webhook";
 import { registerHealth } from "./routes/health";
 import { registerJobs } from "./routes/jobs";
 import { registerPullActions, registerPulls } from "./routes/pulls";
@@ -46,6 +48,8 @@ export function createApp() {
   registerClaude(app);
   registerGithub(app);
   registerWebhook(app);
+  registerGitlab(app);
+  registerGitlabWebhook(app);
   registerProjects(app);
   registerJobs(app);
   registerPulls(app);

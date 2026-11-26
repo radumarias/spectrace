@@ -692,6 +692,382 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/gitlab": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Whether GitLab is on, and the signed-in user's GitLab account */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GitlabStatus"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /** Forget the signed-in user's GitLab account */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Forgotten (also when there was none) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gitlab/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Start connecting a GitLab account (redirects to GitLab) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Redirect to GitLab */
+                303: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description GitLab or its OAuth application is not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gitlab/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GitLab redirects back here; stores the account */
+        get: {
+            parameters: {
+                query?: {
+                    code?: string;
+                    state?: string;
+                    error?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Connected, redirect to /?gitlab=connected */
+                303: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Bad request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description GitLab failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gitlab/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Connect a GitLab account with a personal access token */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GitlabToken"];
+                };
+            };
+            responses: {
+                /** @description Connected */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GitlabStatus"];
+                    };
+                };
+                /** @description GitLab did not accept the token */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description GitLab is not configured */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gitlab/repos": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GitLab repositories the signed-in user can push to */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Repositories, sorted by path; empty when no account is connected */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GitlabRepo"][];
+                    };
+                };
+                /** @description Not signed in */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description GitLab failed */
+                502: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/gitlab/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * GitLab webhook receiver
+         * @description Called by GitLab, not by the web app. Needs `X-Gitlab-Token` and `X-Gitlab-Event`. Handles merge request, push, pipeline and job events; other events are acknowledged and ignored.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Accepted (`handled` is false for events we do not use) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GitlabWebhookResult"];
+                    };
+                };
+                /** @description Not a JSON payload */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Token missing or wrong */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Webhook secret not configured */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -744,6 +1120,11 @@ export interface paths {
                         name: string;
                         context?: string;
                         repos?: {
+                            /**
+                             * @description Default github
+                             * @enum {string}
+                             */
+                            provider?: "github" | "gitlab";
                             github_repo_id?: number | null;
                             full_name: string;
                             default_branch?: string;
@@ -894,6 +1275,11 @@ export interface paths {
                         name?: string;
                         context?: string;
                         repos?: {
+                            /**
+                             * @description Default github
+                             * @enum {string}
+                             */
+                            provider?: "github" | "gitlab";
                             github_repo_id?: number | null;
                             full_name: string;
                             default_branch?: string;
@@ -1024,10 +1410,15 @@ export interface paths {
                 content: {
                     "application/json": {
                         /**
-                         * @description owner/repo, or a link to the repository on GitHub
+                         * @description owner/repo, or a link to the repository on GitHub or on this server's GitLab
                          * @example acme/shop
                          */
                         repo: string;
+                        /**
+                         * @description Where the repo lives; read from a link when left out, else github
+                         * @enum {string}
+                         */
+                        provider?: "github" | "gitlab";
                     };
                 };
             };
@@ -3246,6 +3637,37 @@ export interface components {
             event: string;
             handled: boolean;
         };
+        GitlabStatus: {
+            /** @description This server has a GitLab instance (GITLAB_URL) */
+            configured: boolean;
+            /** @example https://gitlab.example.com */
+            url: string | null;
+            /** @description Connecting through the instance's OAuth application is possible; otherwise only with a token */
+            oauth: boolean;
+            account: {
+                username: string;
+                /** @enum {string} */
+                kind: "oauth" | "token";
+            } | null;
+        };
+        GitlabToken: {
+            /** @description A personal access token with the api scope */
+            token: string;
+        };
+        GitlabRepo: {
+            id: number;
+            full_name: string;
+            name: string;
+            default_branch: string;
+            private: boolean;
+            html_url: string;
+        };
+        GitlabWebhookResult: {
+            /** @enum {boolean} */
+            ok: true;
+            event: string;
+            handled: boolean;
+        };
         Project: {
             id: string;
             name: string;
@@ -3256,6 +3678,8 @@ export interface components {
         };
         ProjectRepo: {
             id: string;
+            /** @enum {string} */
+            provider: "github" | "gitlab";
             github_repo_id: number | null;
             full_name: string;
             default_branch: string;

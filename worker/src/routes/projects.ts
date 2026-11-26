@@ -7,7 +7,9 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { requireUser } from "../auth";
 import type { AppEnv } from "../env";
 import { AppError, ErrorBody } from "../error";
+import { PROVIDERS, type Provider } from "../git";
 import { appConfig, userRepos } from "../github-app";
+import { gitlabConfigOrNull, gitlabToken, gitlabUserRepos } from "../gitlab";
 import { enqueueIndexes } from "../jobs/index-repo";
 
 const MAX_NAME = 120;
@@ -17,6 +19,7 @@ const MAX_REPOS = 50;
 const RepoSchema = z
   .object({
     id: z.string(),
+    provider: z.enum(PROVIDERS),
     github_repo_id: z.number().int().nullable(),
     full_name: z.string(),
     default_branch: z.string(),
@@ -41,6 +44,7 @@ const ProjectSchema = z
   .openapi("Project");
 
 const RepoInput = z.object({
+  provider: z.enum(PROVIDERS).optional().openapi({ description: "Default github" }),
   github_repo_id: z.number().int().nullable().optional(),
   full_name: z.string(),
   default_branch: z.string().optional(),
@@ -59,11 +63,15 @@ const UpdateBody = z.object({
   repos: z.array(RepoInput).optional(),
 });
 
-const AddRepoBody = z.object({ repo: z.string().openapi({ description: "owner/repo, or a link to the repository on GitHub", example: "acme/shop" }) });
+const AddRepoBody = z.object({
+  repo: z.string().openapi({ description: "owner/repo, or a link to the repository on GitHub or on this server's GitLab", example: "acme/shop" }),
+  provider: z.enum(PROVIDERS).optional().openapi({ description: "Where the repo lives; read from a link when left out, else github" }),
+});
 const RepoParams = z.object({ id: z.string(), repoId: z.string() });
 
 type RepoInputT = z.infer<typeof RepoInput>;
 interface CleanRepo {
+  provider: Provider;
   github_repo_id: number | null;
   full_name: string;
   default_branch: string | null;
@@ -170,6 +178,26 @@ function checkContext(context: string) {
 }
 
 const REPO_PART = /^[A-Za-z0-9._-]+$/;
+/** At most this many path parts on GitLab: group, subgroups, name. */
+const MAX_GITLAB_DEPTH = 20;
+
+/** GitHub: owner/name. GitLab: group/(subgroup/)*name. */
+function validName(provider: Provider, fullName: string): boolean {
+  const parts = fullName.split("/");
+  const ok = parts.every((p) => REPO_PART.test(p));
+  return ok && (provider === "github" ? parts.length === 2 : parts.length >= 2 && parts.length <= MAX_GITLAB_DEPTH);
+}
+
+/** A GitLab link (`https://gitlab.example.com/group/name`, `.git`, `/-/merge_requests/3`) as group/name, or null when it is not one. */
+export function gitlabPath(input: string, gitlabUrl: string | null): string | null {
+  if (!gitlabUrl) return null;
+  const v = input.trim();
+  const host = new URL(gitlabUrl).host.toLowerCase();
+  const m = /^(?:https?:\/\/)?([^/]+)\/(.*)$/i.exec(v);
+  if (!m || (m[1] ?? "").toLowerCase() !== host) return null;
+  const path = (m[2] ?? "").split(/[?#]/)[0] ?? "";
+  return path.split("/-/")[0]!.replace(/\/+$/, "").replace(/\.git$/i, "");
+}
 
 /** Validate and normalise repos: `owner/name`, no duplicates (case-insensitive). */
 function cleanRepos(repos: RepoInputT[]): CleanRepo[] {
@@ -177,15 +205,15 @@ function cleanRepos(repos: RepoInputT[]): CleanRepo[] {
   const seen = new Set<string>();
   return repos.map((r) => {
     const fullName = r.full_name.trim();
-    const parts = fullName.split("/");
-    if (parts.length !== 2 || !parts.every((p) => REPO_PART.test(p))) {
-      throw AppError.badRequest(`repository must look like owner/name, got ${JSON.stringify(fullName)}`);
+    const provider = r.provider ?? "github";
+    if (!validName(provider, fullName)) {
+      throw AppError.badRequest(`repository must look like ${provider === "gitlab" ? "group/name" : "owner/name"}, got ${JSON.stringify(fullName)}`);
     }
     if (seen.has(fullName.toLowerCase())) throw AppError.badRequest(`repository ${fullName} is listed twice`);
     seen.add(fullName.toLowerCase());
     const branch = r.default_branch?.trim();
     if (r.default_branch !== undefined && !branch) throw AppError.badRequest("default_branch is empty");
-    return { github_repo_id: r.github_repo_id ?? null, full_name: fullName, default_branch: branch ?? null };
+    return { provider, github_repo_id: provider === "github" ? (r.github_repo_id ?? null) : null, full_name: fullName, default_branch: branch ?? null };
   });
 }
 
@@ -199,6 +227,7 @@ interface ProjectRow {
 interface RepoRow {
   id: string;
   project_id: string;
+  provider: Provider;
   github_repo_id: number | null;
   full_name: string;
   default_branch: string;
@@ -210,12 +239,13 @@ interface RepoRow {
   index_error: string | null;
 }
 
-const REPO_COLUMNS = "id, project_id, github_repo_id, full_name, default_branch, index_state, languages, file_count, tree_truncated, indexed_at, index_error";
+const REPO_COLUMNS = "id, project_id, provider, github_repo_id, full_name, default_branch, index_state, languages, file_count, tree_truncated, indexed_at, index_error";
 
 const notFound = (id: string) => AppError.notFound(`project ${id}`);
 
 const toRepo = (r: RepoRow) => ({
   id: r.id,
+  provider: r.provider,
   github_repo_id: r.github_repo_id,
   full_name: r.full_name,
   default_branch: r.default_branch,
@@ -253,10 +283,10 @@ export async function requireProjectOwner(db: D1Database, owner: string, id: str
 const insertRepo = (db: D1Database, projectId: string, r: CleanRepo, now: string) =>
   db
     .prepare(
-      `INSERT INTO project_repos (id, project_id, github_repo_id, full_name, default_branch, created_at)
-       VALUES (?1, ?2, ?3, ?4, COALESCE(?5, 'main'), ?6)`,
+      `INSERT INTO project_repos (id, project_id, github_repo_id, full_name, default_branch, created_at, provider)
+       VALUES (?1, ?2, ?3, ?4, COALESCE(?5, 'main'), ?6, ?7)`,
     )
-    .bind(crypto.randomUUID(), projectId, r.github_repo_id, r.full_name, r.default_branch, now);
+    .bind(crypto.randomUUID(), projectId, r.github_repo_id, r.full_name, r.default_branch, now, r.provider);
 
 export function registerProjects(app: OpenAPIHono<AppEnv>) {
   app.openapi(listRoute, async (c) => {
@@ -338,13 +368,13 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
         statements.push(
           db
             .prepare(
-              `INSERT INTO project_repos (id, project_id, github_repo_id, full_name, default_branch, created_at)
-               VALUES (?1, ?2, ?3, ?4, COALESCE(?5, 'main'), ?6)
+              `INSERT INTO project_repos (id, project_id, github_repo_id, full_name, default_branch, created_at, provider)
+               VALUES (?1, ?2, ?3, ?4, COALESCE(?5, 'main'), ?6, ?7)
                ON CONFLICT (project_id, full_name) DO UPDATE
                  SET github_repo_id = COALESCE(excluded.github_repo_id, project_repos.github_repo_id),
-                     default_branch = COALESCE(?5, project_repos.default_branch)`,
+                     default_branch = COALESCE(?5, project_repos.default_branch), provider = excluded.provider`,
             )
-            .bind(crypto.randomUUID(), id, r.github_repo_id, r.full_name, r.default_branch, now),
+            .bind(crypto.randomUUID(), id, r.github_repo_id, r.full_name, r.default_branch, now, r.provider),
         );
       }
     }
@@ -372,14 +402,16 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
   app.openapi(addRepoRoute, async (c) => {
     const user = await requireUser(c);
     const { id } = c.req.valid("param");
-    const { repo: typed } = c.req.valid("json");
+    const { repo: typed, provider: asked } = c.req.valid("json");
     await requireProjectOwner(c.env.DB, user.id, id);
 
+    const gitlab = gitlabConfigOrNull(c.env);
+    const fromLink = gitlabPath(typed, gitlab?.url ?? null);
+    const provider: Provider = asked ?? (fromLink !== null ? "gitlab" : "github");
     // The three messages below are the prototype's, word for word; the web app shows them as they are.
-    const name = normalizeRepo(typed);
+    const name = provider === "gitlab" ? (fromLink ?? typed.trim().replace(/\.git$/i, "").replace(/^\/+|\/+$/g, "")) : normalizeRepo(typed);
     if (!name) throw new AppError("bad_request", "Type a repo first, like owner/repo.");
-    const parts = name.split("/");
-    if (parts.length !== 2 || !parts.every((p) => REPO_PART.test(p))) throw new AppError("bad_request", "That does not look like owner/repo.");
+    if (!validName(provider, name)) throw new AppError("bad_request", "That does not look like owner/repo.");
 
     const db = c.env.DB;
     const { results: current } = await db.prepare("SELECT full_name FROM project_repos WHERE project_id = ?1").bind(id).all<{ full_name: string }>();
@@ -387,23 +419,34 @@ export function registerProjects(app: OpenAPIHono<AppEnv>) {
     if (current.some((r) => r.full_name.toLowerCase() === lower)) throw new AppError("conflict", `${name} is already in this project.`);
     if (current.length >= MAX_REPOS) throw AppError.badRequest(`a project can have at most ${MAX_REPOS} repositories`);
 
-    const known = (await userRepos(appConfig(c), db, user.id)).find((r) => r.full_name.toLowerCase() === lower);
-    if (!known) {
-      throw new AppError("forbidden", `${name} is not available to the GitHub App. Install the App on it, then add it again.`);
+    let known: { id: number | null; full_name: string; default_branch: string };
+    if (provider === "gitlab") {
+      if (!gitlab) throw new AppError("not_configured", "GitLab is not configured on this server (GITLAB_URL)");
+      const token = await gitlabToken(c.env, gitlab, user.id);
+      if (!token) throw new AppError("forbidden", "Connect your GitLab account first, then add the repo again.");
+      const found = (await gitlabUserRepos(gitlab, token)).find((r) => r.full_name.toLowerCase() === lower);
+      if (!found) throw new AppError("forbidden", `${name} is not one of your GitLab repositories (you need Developer access or more).`);
+      known = { id: null, full_name: found.full_name, default_branch: found.default_branch };
+    } else {
+      const found = (await userRepos(appConfig(c), db, user.id)).find((r) => r.full_name.toLowerCase() === lower);
+      if (!found) {
+        throw new AppError("forbidden", `${name} is not available to the GitHub App. Install the App on it, then add it again.`);
+      }
+      // A renamed repo keeps its GitHub id: still a duplicate.
+      const same = await db.prepare("SELECT full_name FROM project_repos WHERE project_id = ?1 AND github_repo_id = ?2").bind(id, found.id).first<{ full_name: string }>();
+      if (same) throw new AppError("conflict", `${found.full_name} is already in this project.`);
+      known = found;
     }
-    // A renamed repo keeps its GitHub id: still a duplicate.
-    const same = await db.prepare("SELECT full_name FROM project_repos WHERE project_id = ?1 AND github_repo_id = ?2").bind(id, known.id).first<{ full_name: string }>();
-    if (same) throw new AppError("conflict", `${known.full_name} is already in this project.`);
 
     const now = new Date().toISOString();
     const repoId = crypto.randomUUID();
     await db.batch([
       db
         .prepare(
-          `INSERT INTO project_repos (id, project_id, github_repo_id, full_name, default_branch, created_at)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+          `INSERT INTO project_repos (id, project_id, github_repo_id, full_name, default_branch, created_at, provider)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
         )
-        .bind(repoId, id, known.id, known.full_name, known.default_branch, now),
+        .bind(repoId, id, known.id, known.full_name, known.default_branch, now, provider),
       db.prepare("UPDATE projects SET updated_at = ?2 WHERE id = ?1").bind(id, now),
     ]);
     const row = await db

@@ -12,3 +12,8 @@ GITHUB_APP_SLUG=
 GITHUB_APP_PRIVATE_KEY=
 # The App's webhook secret; set the same string on the App (Webhook URL: PUBLIC_URL + /api/github/webhook)
 GITHUB_WEBHOOK_SECRET=
+# GitLab (optional, see README "GitLab"): the instance, its OAuth application, and the webhook secret token
+GITLAB_URL=
+GITLAB_CLIENT_ID=
+GITLAB_CLIENT_SECRET=
+GITLAB_WEBHOOK_SECRET=

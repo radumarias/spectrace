@@ -50,7 +50,7 @@ export async function validSignature(secret: string, body: ArrayBuffer, header: 
   return crypto.subtle.verify("HMAC", key, hexToBytes(hex), body);
 }
 
-interface RepoRow {
+export interface RepoRow {
   id: string;
   project_id: string;
   full_name: string;
@@ -58,12 +58,12 @@ interface RepoRow {
 }
 
 /** What changed, as a live event for the project. */
-interface Change {
+export interface Change {
   event: "pr.updated" | "repo.pushed";
   data: Record<string, unknown>;
 }
 
-interface Payload {
+export interface Payload {
   action?: string;
   repository?: { full_name?: string };
   pull_request?: GhPull;
@@ -76,10 +76,10 @@ interface Payload {
   deleted?: boolean;
 }
 
-const prChange = (repo: RepoRow, number: number, cause: string): Change => ({ event: "pr.updated", data: { repo: repo.full_name, number, cause } });
+export const prChange = (repo: RepoRow, number: number, cause: string): Change => ({ event: "pr.updated", data: { repo: repo.full_name, number, cause } });
 
 /** Queue a sync for the repo unless one is already waiting (it will see the newest state). */
-async function requestSync(env: Bindings, repo: RepoRow): Promise<void> {
+export async function requestSync(env: Bindings, repo: RepoRow): Promise<void> {
   const waiting = await env.DB.prepare("SELECT 1 AS x FROM jobs WHERE project_id = ?1 AND kind = ?2 AND target = ?3 AND state = 'queued' LIMIT 1")
     .bind(repo.project_id, SYNC_KIND, repo.full_name)
     .first();
@@ -162,7 +162,7 @@ async function onCheckRun(env: Bindings, repo: RepoRow, p: Payload): Promise<Cha
 
 const BRANCH = "refs/heads/";
 
-async function onPush(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[] | null> {
+export async function onPush(env: Bindings, repo: RepoRow, p: Payload): Promise<Change[] | null> {
   if (!p.ref?.startsWith(BRANCH) || !p.after) return null;
   const branch = p.ref.slice(BRANCH.length);
   if (p.deleted) return [];
@@ -192,7 +192,7 @@ const HANDLERS: Record<string, (env: Bindings, repo: RepoRow, p: Payload) => Pro
 };
 
 /** Webhook changes ride on a finished "webhook" job per project and delivery, so they reach the live feed and its replay. */
-async function announce(env: Bindings, projectId: string, delivery: string, event: string, changes: Change[]): Promise<void> {
+export async function announce(env: Bindings, projectId: string, delivery: string, event: string, changes: Change[]): Promise<void> {
   if (changes.length === 0) return;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${delivery}:${projectId}`));
   const id = `wh-${[...new Uint8Array(digest).slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
