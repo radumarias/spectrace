@@ -8,7 +8,7 @@ import type { AppEnv } from "../env";
 import { requireUser } from "../auth";
 import { AppError, ErrorBody } from "../error";
 import { requireProjectOwner } from "./projects";
-import { github } from "./pulls";
+import { repoClient, type RepoClient } from "../git";
 
 const ProjectParam = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).openapi({ param: { name: "projectId", in: "path" } });
 const SpecParam = z.string().regex(/^[A-Za-z0-9-]{1,64}$/).openapi({ param: { name: "specId", in: "path" } });
@@ -169,23 +169,9 @@ const changeRoute = createRoute({
     400: err("Nothing changed, or the edited spec has errors"),
     401: err("Not signed in"),
     404: err("No such project or spec"),
-    409: err("The spec changed on GitHub since it was indexed, or GitHub refused"),
+    409: err("The spec changed on the host since it was indexed, or the host refused"),
   },
 });
-
-/** UTF-8 text as base64, for the contents API. */
-function base64(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(bin);
-}
-const unbase64 = (b64: string) => new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, "")), (c) => c.charCodeAt(0)));
-
-type GhAnswer = { status: number; json: Record<string, unknown> };
-const refuse = (what: string, res: GhAnswer) =>
-  new AppError("conflict", `conflict: ${what}: ${typeof res.json.message === "string" ? res.json.message : `GitHub answered ${res.status}`}`);
-const encodePath = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 
 /** Commits new files on a new branch from the default branch and opens one pull request for them. Refuses (409) when a file already exists there. */
 export async function openFilesPull(
@@ -193,57 +179,37 @@ export async function openFilesPull(
   projectId: string,
   o: { repo: string; defaultBranch: string; branch: string; files: { path: string; source: string }[]; message: string; title: string; body: string },
 ): Promise<z.infer<typeof SpecChangeOpened>> {
-  const { repo } = o;
+  const client = await repoClient(env, projectId, o.repo, "write");
   for (const f of o.files) {
-    const there = await github(env, projectId, repo, "GET", `/repos/${repo}/contents/${encodePath(f.path)}?ref=${encodeURIComponent(o.defaultBranch)}`, undefined);
-    if (there.status === 200) throw new AppError("conflict", `conflict: ${f.path} already exists on ${o.defaultBranch}`);
-    if (there.status !== 404) throw refuse(`checking ${f.path}`, there);
+    if (await client.readFile(f.path, o.defaultBranch)) throw new AppError("conflict", `conflict: ${f.path} already exists on ${o.defaultBranch}`);
   }
-  const head = await github(env, projectId, repo, "GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(o.defaultBranch)}`, undefined);
-  const base = (head.json.object as { sha?: unknown } | undefined)?.sha;
-  if (head.status !== 200 || typeof base !== "string") throw refuse(`reading ${o.defaultBranch}`, head);
-  const ref = await github(env, projectId, repo, "POST", `/repos/${repo}/git/refs`, { ref: `refs/heads/${o.branch}`, sha: base });
-  if (ref.status !== 201) throw refuse(`creating ${o.branch}`, ref);
+  const base = await client.branchHead(o.defaultBranch);
+  await client.createBranch(o.branch, base);
   for (const f of o.files) {
-    const put = await github(env, projectId, repo, "PUT", `/repos/${repo}/contents/${encodePath(f.path)}`, { message: `${o.message}: ${f.path}`, content: base64(f.source), branch: o.branch });
-    if (put.status !== 200 && put.status !== 201) throw refuse(`committing ${f.path}`, put);
+    await client.putFile({ path: f.path, branch: o.branch, message: `${o.message}: ${f.path}`, text: f.source, sha: null });
   }
-  const pr = await github(env, projectId, repo, "POST", `/repos/${repo}/pulls`, { title: o.title, head: o.branch, base: o.defaultBranch, body: o.body });
-  if (pr.status !== 201 || typeof pr.json.number !== "number" || typeof pr.json.html_url !== "string") throw refuse("opening the pull request", pr);
-  return { number: pr.json.number, url: pr.json.html_url, branch: o.branch };
+  const pr = await client.openPull({ title: o.title, head: o.branch, base: o.defaultBranch, body: o.body });
+  return { ...pr, branch: o.branch };
 }
 
 /** Commits `source` to `path` on a new branch from the default branch and opens a pull request for it. */
 async function openSpecPull(
-  env: AppEnv["Bindings"],
-  projectId: string,
+  client: RepoClient,
   login: string,
-  o: { repo: string; defaultBranch: string; path: string; flow: string; title: string; source: string; fileSha: string | null; summary: string[]; verb: "Edit" | "Add" },
+  o: { defaultBranch: string; path: string; flow: string; title: string; source: string; fileSha: string | null; summary: string[]; verb: "Edit" | "Add" },
 ): Promise<z.infer<typeof SpecChangeOpened>> {
-  const { repo } = o;
-  const path = encodePath(o.path);
-  const head = await github(env, projectId, repo, "GET", `/repos/${repo}/git/ref/heads/${encodeURIComponent(o.defaultBranch)}`, undefined);
-  const base = (head.json.object as { sha?: unknown } | undefined)?.sha;
-  if (head.status !== 200 || typeof base !== "string") throw refuse(`reading ${o.defaultBranch}`, head);
+  const base = await client.branchHead(o.defaultBranch);
   const branch = `spectrace/spec-${o.flow}-${Date.now().toString(36)}`;
-  const ref = await github(env, projectId, repo, "POST", `/repos/${repo}/git/refs`, { ref: `refs/heads/${branch}`, sha: base });
-  if (ref.status !== 201) throw refuse(`creating ${branch}`, ref);
+  await client.createBranch(branch, base);
   const lines = o.summary.length ? o.summary : [o.verb === "Add" ? "Added the spec" : "Edited the spec"];
-  const put = await github(env, projectId, repo, "PUT", `/repos/${repo}/contents/${path}`, {
-    message: `${o.verb} ${o.path}\n\n${lines.map((l) => `- ${l}`).join("\n")}`,
-    content: base64(o.source),
-    ...(o.fileSha ? { sha: o.fileSha } : {}),
-    branch,
-  });
-  if (put.status !== 200 && put.status !== 201) throw refuse(`committing ${o.path}`, put);
-  const pr = await github(env, projectId, repo, "POST", `/repos/${repo}/pulls`, {
+  await client.putFile({ path: o.path, branch, message: `${o.verb} ${o.path}\n\n${lines.map((l) => `- ${l}`).join("\n")}`, text: o.source, sha: o.fileSha });
+  const pr = await client.openPull({
     title: o.verb === "Add" ? `Spec: add ${o.title || o.flow}` : `Spec: ${o.title || o.flow} (${lines.length} ${lines.length === 1 ? "change" : "changes"})`,
     head: branch,
     base: o.defaultBranch,
     body: `${o.verb === "Add" ? "Drafted on a whiteboard and edited" : "Edited"} in the spectrace diagram editor by @${login}.\n\n${lines.map((l) => `- ${l}`).join("\n")}`,
   });
-  if (pr.status !== 201 || typeof pr.json.number !== "number" || typeof pr.json.html_url !== "string") throw refuse("opening the pull request", pr);
-  return { number: pr.json.number, url: pr.json.html_url, branch };
+  return { ...pr, branch };
 }
 
 const NewSpec = z
@@ -268,7 +234,7 @@ const newRoute = createRoute({
     400: err("The spec has errors"),
     401: err("Not signed in"),
     404: err("No such project or repo"),
-    409: err("The file already exists, or GitHub refused"),
+    409: err("The file already exists, or the host refused"),
   },
 });
 
@@ -372,14 +338,13 @@ export function registerSpecs(app: OpenAPIHono<AppEnv>) {
     const errors = parseSpec(row.path, source).diagnostics.filter((d) => d.code.startsWith("S"));
     if (errors.length) throw AppError.badRequest(`the edited spec has errors: ${errors.map((d) => `${d.code} line ${d.line} ${d.message}`).join("; ")}`);
 
-    const repo = row.full_name;
-    const path = encodePath(row.path);
-    const file = await github(c.env, projectId, repo, "GET", `/repos/${repo}/contents/${path}?ref=${encodeURIComponent(row.default_branch)}`, undefined);
-    if (file.status !== 200 || typeof file.json.sha !== "string" || typeof file.json.content !== "string") throw refuse(`reading ${row.path}`, file);
-    if (unbase64(file.json.content) !== row.source) {
+    const client = await repoClient(c.env, projectId, row.full_name, "write");
+    const file = await client.readFile(row.path, row.default_branch);
+    if (!file) throw new AppError("conflict", `conflict: ${row.path} is not on ${row.default_branch} any more; re-index the repo`);
+    if (file.text !== row.source) {
       throw new AppError("conflict", `conflict: ${row.path} changed on ${row.default_branch} since it was indexed; re-index the repo and edit again`);
     }
-    const opened = await openSpecPull(c.env, projectId, user.login, { repo, defaultBranch: row.default_branch, path: row.path, flow: row.flow, title: row.title, source, fileSha: file.json.sha, summary, verb: "Edit" });
+    const opened = await openSpecPull(client, user.login, { defaultBranch: row.default_branch, path: row.path, flow: row.flow, title: row.title, source, fileSha: file.sha, summary, verb: "Edit" });
     return c.json(opened, 201);
   });
 
@@ -396,12 +361,11 @@ export function registerSpecs(app: OpenAPIHono<AppEnv>) {
     const parsed = parseSpec(file, source);
     const errors = parsed.diagnostics.filter((d) => d.code.startsWith("S"));
     if (errors.length) throw AppError.badRequest(`the spec has errors: ${errors.map((d) => `${d.code} line ${d.line} ${d.message}`).join("; ")}`);
-    const there = await github(c.env, projectId, repo.full_name, "GET", `/repos/${repo.full_name}/contents/${encodePath(file)}?ref=${encodeURIComponent(repo.default_branch)}`, undefined);
-    if (there.status === 200) throw new AppError("conflict", `conflict: ${file} already exists on ${repo.default_branch}`);
-    if (there.status !== 404) throw refuse(`checking ${file}`, there);
+    const client = await repoClient(c.env, projectId, repo.full_name, "write");
+    if (await client.readFile(file, repo.default_branch)) throw new AppError("conflict", `conflict: ${file} already exists on ${repo.default_branch}`);
     const flow = parsed.spec.flow;
     const title = parsed.spec.title?.text ?? flow;
-    const opened = await openSpecPull(c.env, projectId, user.login, { repo: repo.full_name, defaultBranch: repo.default_branch, path: file, flow, title, source, fileSha: null, summary, verb: "Add" });
+    const opened = await openSpecPull(client, user.login, { defaultBranch: repo.default_branch, path: file, flow, title, source, fileSha: null, summary, verb: "Add" });
     return c.json(opened, 201);
   });
 }

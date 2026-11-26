@@ -2205,7 +2205,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The spec changed on GitHub since it was indexed, or GitHub refused */
+                /** @description The spec changed on the host since it was indexed, or the host refused */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2283,7 +2283,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The file already exists, or GitHub refused */
+                /** @description The file already exists, or the host refused */
                 409: {
                     headers: {
                         [name: string]: unknown;
